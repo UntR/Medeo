@@ -6,6 +6,14 @@ medeo is a personal Android media discovery and playback app. It provides a Doub
 
 The project is built for self-use sideload distribution. It is not intended for app-store release.
 
+## Screenshots
+
+<p>
+  <img src="docs/screenshots/home.jpeg" alt="medeo home hot list" width="30%" />
+  <img src="docs/screenshots/favorites.jpeg" alt="medeo favorites" width="30%" />
+  <img src="docs/screenshots/settings.jpeg" alt="medeo settings" width="30%" />
+</p>
+
 ## Current Version
 
 - App name: `medeo`
@@ -58,6 +66,7 @@ app/
     MainActivity.kt
 docs/
   medeo-logo-preview.svg
+  screenshots/
 gradle/
   wrapper/
 ```
