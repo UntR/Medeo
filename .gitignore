@@ -1,0 +1,46 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Kotlin / Android generated files
+.kotlin/
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.ap_
+*.aab
+*.idsig
+*.hprof
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Local machine configuration
+local.properties
+/local.properties
+AGENTS.md
+CLAUDE.md
+
+# Signing material. Never commit real release keys or passwords.
+keystore.properties
+keystore/*.jks
+keystore/*.keystore
+*.jks
+*.keystore
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Old local preview artifacts
+docs/ying-logo-preview.png

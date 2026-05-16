@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "dbzy",
+      "name": "豆瓣资源",
+      "base_url": "https://dbzy.tv/api.php/provide/vod",
+      "default_enabled": true
+    },
+    {
+      "id": "custom1",
+      "name": "我的 VPS 源",
+      "base_url": "https://example.com/api.php/provide/vod",
+      "default_enabled": true
+    }
+  ]
+}
