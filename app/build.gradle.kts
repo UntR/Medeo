@@ -32,11 +32,11 @@ plugins {
 }
 
 android {
-    namespace = "com.czpn7.ying"
+    namespace = "com.untr.medeo"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.czpn7.ying"
+        applicationId = "com.untr.medeo"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
