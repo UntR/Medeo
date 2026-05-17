@@ -74,7 +74,7 @@ object NetworkModule {
                     .header(
                         "User-Agent",
                         "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
-                            "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/n0.1"
+                            "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/v0.1"
                     )
                     .header("Accept", "*/*")
                     .header("Referer", "https://movie.douban.com/explore")
