@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -42,6 +44,9 @@ import coil3.compose.AsyncImage
 import com.untr.medeo.data.model.PlaySource
 import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.local.WatchProgress
+import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
+import com.untr.medeo.ui.adaptive.MedeoWindowClass
+import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.EpisodeListRow
 import com.untr.medeo.ui.components.InstantTabItem
 import com.untr.medeo.ui.components.InstantTabRow
@@ -54,6 +59,7 @@ fun DetailScreen(
     onBack: () -> Unit,
     onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit,
     modifier: Modifier = Modifier,
+    windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
     viewModel: DetailViewModel = hiltViewModel()
 ) {
     val state = viewModel.uiState
@@ -73,6 +79,7 @@ fun DetailScreen(
             onBack = onBack,
             onPlay = onPlay,
             onToggleFavorite = viewModel::toggleFavorite,
+            windowClass = windowClass,
             modifier = modifier
         )
     }
@@ -86,6 +93,7 @@ private fun DetailContent(
     onBack: () -> Unit,
     onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit,
     onToggleFavorite: (VodDetail) -> Unit,
+    windowClass: MedeoWindowClass,
     modifier: Modifier = Modifier
 ) {
     var selectedDetailIndex by remember(details) { mutableIntStateOf(0) }
@@ -93,6 +101,110 @@ private fun DetailContent(
     val detail = details.getOrNull(selectedDetailIndex) ?: return
     val playSource = detail.playSources.getOrNull(selectedLineIndex)
 
+    if (windowClass == MedeoWindowClass.Expanded) {
+        TabletDetailContent(
+            details = details,
+            detail = detail,
+            playSource = playSource,
+            selectedDetailIndex = selectedDetailIndex,
+            selectedLineIndex = selectedLineIndex,
+            favorite = detail.item.key in favoriteKeys,
+            progress = progressByKey[detail.item.key],
+            onSelectDetail = {
+                selectedDetailIndex = it
+                selectedLineIndex = 0
+            },
+            onSelectLine = { selectedLineIndex = it },
+            onBack = onBack,
+            onPlay = onPlay,
+            onToggleFavorite = { onToggleFavorite(detail) },
+            windowClass = windowClass,
+            modifier = modifier
+        )
+    } else {
+        PhoneDetailContent(
+            details = details,
+            detail = detail,
+            playSource = playSource,
+            selectedDetailIndex = selectedDetailIndex,
+            selectedLineIndex = selectedLineIndex,
+            favorite = detail.item.key in favoriteKeys,
+            progress = progressByKey[detail.item.key],
+            onSelectDetail = {
+                selectedDetailIndex = it
+                selectedLineIndex = 0
+            },
+            onSelectLine = { selectedLineIndex = it },
+            onBack = onBack,
+            onPlay = onPlay,
+            onToggleFavorite = { onToggleFavorite(detail) },
+            windowClass = windowClass,
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+private fun PhoneDetailContent(
+    details: List<VodDetail>,
+    detail: VodDetail,
+    playSource: PlaySource?,
+    selectedDetailIndex: Int,
+    selectedLineIndex: Int,
+    favorite: Boolean,
+    progress: WatchProgress?,
+    onSelectDetail: (Int) -> Unit,
+    onSelectLine: (Int) -> Unit,
+    onBack: () -> Unit,
+    onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit,
+    onToggleFavorite: () -> Unit,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        AdaptiveWidthBox(
+            windowClass = windowClass,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            PhoneDetailList(
+                details = details,
+                detail = detail,
+                playSource = playSource,
+                selectedDetailIndex = selectedDetailIndex,
+                selectedLineIndex = selectedLineIndex,
+                favorite = favorite,
+                progress = progress,
+                onSelectDetail = onSelectDetail,
+                onSelectLine = onSelectLine,
+                onBack = onBack,
+                onPlay = onPlay,
+                onToggleFavorite = onToggleFavorite,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhoneDetailList(
+    details: List<VodDetail>,
+    detail: VodDetail,
+    playSource: PlaySource?,
+    selectedDetailIndex: Int,
+    selectedLineIndex: Int,
+    favorite: Boolean,
+    progress: WatchProgress?,
+    onSelectDetail: (Int) -> Unit,
+    onSelectLine: (Int) -> Unit,
+    onBack: () -> Unit,
+    onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit,
+    onToggleFavorite: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -102,9 +214,9 @@ private fun DetailContent(
     ) {
         item {
             DetailToolbar(
-                favorite = detail.item.key in favoriteKeys,
+                favorite = favorite,
                 onBack = onBack,
-                onToggleFavorite = { onToggleFavorite(detail) }
+                onToggleFavorite = onToggleFavorite
             )
         }
 
@@ -112,11 +224,11 @@ private fun DetailContent(
             DetailHeader(detail)
         }
 
-        progressByKey[detail.item.key]?.let { progress ->
+        progress?.let {
             item {
                 ContinueWatchingButton(
                     detail = detail,
-                    progress = progress,
+                    progress = it,
                     onPlay = onPlay
                 )
             }
@@ -138,10 +250,7 @@ private fun DetailContent(
                     SourceTabs(
                         details = details,
                         selectedIndex = selectedDetailIndex,
-                        onSelected = {
-                            selectedDetailIndex = it
-                            selectedLineIndex = 0
-                        }
+                        onSelected = onSelectDetail
                     )
                 }
             }
@@ -151,7 +260,7 @@ private fun DetailContent(
                     LineTabs(
                         playSources = detail.playSources,
                         selectedIndex = selectedLineIndex,
-                        onSelected = { selectedLineIndex = it }
+                        onSelected = onSelectLine
                     )
                 }
             }
@@ -176,6 +285,131 @@ private fun DetailContent(
         } else {
             item {
                 Text("暂无可播放线路")
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletDetailContent(
+    details: List<VodDetail>,
+    detail: VodDetail,
+    playSource: PlaySource?,
+    selectedDetailIndex: Int,
+    selectedLineIndex: Int,
+    favorite: Boolean,
+    progress: WatchProgress?,
+    onSelectDetail: (Int) -> Unit,
+    onSelectLine: (Int) -> Unit,
+    onBack: () -> Unit,
+    onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit,
+    onToggleFavorite: () -> Unit,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        AdaptiveWidthBox(
+            windowClass = windowClass,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .widthIn(max = 430.dp)
+                        .weight(0.42f),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        DetailToolbar(
+                            favorite = favorite,
+                            onBack = onBack,
+                            onToggleFavorite = onToggleFavorite
+                        )
+                    }
+                    item {
+                        DetailHeader(detail)
+                    }
+                    progress?.let {
+                        item {
+                            ContinueWatchingButton(
+                                detail = detail,
+                                progress = it,
+                                onPlay = onPlay
+                            )
+                        }
+                    }
+                    detail.playbackIssue?.let { issue ->
+                        item {
+                            IssueCard(issue)
+                        }
+                    }
+                    item {
+                        SummaryCard(detail.content.orEmpty().ifBlank { "暂无简介" })
+                    }
+                }
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .weight(0.58f),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (detail.playSources.isNotEmpty()) {
+                        if (details.size > 1) {
+                            item {
+                                SourceTabs(
+                                    details = details,
+                                    selectedIndex = selectedDetailIndex,
+                                    onSelected = onSelectDetail
+                                )
+                            }
+                        }
+
+                        if (detail.playSources.size > 1) {
+                            item {
+                                LineTabs(
+                                    playSources = detail.playSources,
+                                    selectedIndex = selectedLineIndex,
+                                    onSelected = onSelectLine
+                                )
+                            }
+                        }
+
+                        playSource?.let { source ->
+                            itemsIndexed(source.episodes) { episodeIndex, episode ->
+                                EpisodeListRow(
+                                    episode = episode,
+                                    index = episodeIndex,
+                                    selected = false,
+                                    onClick = {
+                                        onPlay(
+                                            detail.item.sourceId,
+                                            detail.item.vodId,
+                                            selectedLineIndex,
+                                            episodeIndex
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        item {
+                            Text("暂无可播放线路")
+                        }
+                    }
+                }
             }
         }
     }

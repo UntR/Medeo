@@ -84,6 +84,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.untr.medeo.data.model.VodDetail
+import com.untr.medeo.ui.adaptive.MedeoWindowClass
+import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.EpisodeListRow
 import com.untr.medeo.ui.components.InstantTabItem
 import com.untr.medeo.ui.components.InstantTabRow
@@ -104,6 +106,7 @@ private const val LONG_PRESS_SPEED = 2f
 fun PlayerScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val state = viewModel.uiState
@@ -118,6 +121,7 @@ fun PlayerScreen(
             episodeUrl = episode.url,
             autoPlayBlocked = state.wifiOnlyPlay && !state.networkSnapshot.wifiLike,
             onBack = onBack,
+            windowClass = windowClass,
             modifier = modifier
         )
     }
@@ -131,6 +135,7 @@ private fun PlayerContent(
     episodeUrl: String,
     autoPlayBlocked: Boolean,
     onBack: () -> Unit,
+    windowClass: MedeoWindowClass,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -152,6 +157,7 @@ private fun PlayerContent(
     var controlsVisible by remember { mutableStateOf(true) }
     var controlsLocked by remember { mutableStateOf(false) }
     var drawerVisible by remember { mutableStateOf(false) }
+    var immersiveRequested by rememberSaveable { mutableStateOf(false) }
     var speedMenuExpanded by remember { mutableStateOf(false) }
     var gestureMessage by remember { mutableStateOf<String?>(null) }
     var autoPlayNoticeVisible by remember(episodeUrl, autoPlayBlocked) { mutableStateOf(autoPlayBlocked) }
@@ -168,6 +174,8 @@ private fun PlayerContent(
         sourceLabel.takeIf { it.isNotBlank() },
         episode?.name?.takeIf { it.isNotBlank() }
     ).joinToString(" / ")
+    val useFullscreen = immersiveRequested || (isLandscape && !windowClass.usesWideLayout)
+    val useTheaterLayout = windowClass.usesWideLayout && !useFullscreen
 
     val player = remember(episodeUrl, autoPlayBlocked) {
         val loadControl = DefaultLoadControl.Builder()
@@ -229,9 +237,9 @@ private fun PlayerContent(
         controlsVisible = true
     }
 
-    LaunchedEffect(activity, isLandscape) {
+    LaunchedEffect(activity, useFullscreen) {
         if (activity != null) {
-            if (isLandscape) {
+            if (useFullscreen) {
                 activity.enterImmersive()
             } else {
                 activity.exitImmersive()
@@ -319,9 +327,9 @@ private fun PlayerContent(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(if (isLandscape) Color.Black else MaterialTheme.colorScheme.background)
+            .background(if (useFullscreen) Color.Black else MaterialTheme.colorScheme.background)
     ) {
-        if (isLandscape) {
+        if (useFullscreen) {
             PlayerSurface(
                 player = player,
                 title = title,
@@ -350,7 +358,12 @@ private fun PlayerContent(
                     onBack()
                 },
                 onRotate = {
-                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    immersiveRequested = false
+                    activity?.requestedOrientation = if (windowClass.usesWideLayout) {
+                        ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    }
                 },
                 onPrevious = {
                     saveProgress()
@@ -399,6 +412,138 @@ private fun PlayerContent(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+        } else if (useTheaterLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    PlayerSurface(
+                        player = player,
+                        title = title,
+                        subtitle = subtitle,
+                        playbackError = playbackError,
+                        playbackNotice = if (autoPlayNoticeVisible) "当前非 Wi-Fi，已暂停自动播放" else null,
+                        isPlaying = isPlaying,
+                        playbackState = playbackState,
+                        playbackSpeed = playbackSpeed,
+                        currentPosition = currentPosition,
+                        duration = duration,
+                        bufferedPosition = bufferedPosition,
+                        controlsVisible = controlsVisible,
+                        controlsLocked = controlsLocked,
+                        speedMenuExpanded = speedMenuExpanded,
+                        resizeMode = resizeMode,
+                        resizeLabel = resizeOption.label,
+                        gestureMessage = gestureMessage,
+                        isLandscape = false,
+                        onToggleControls = { controlsVisible = !controlsVisible },
+                        onTogglePlay = ::togglePlayback,
+                        onSeekTo = { player.seekTo(it) },
+                        onSeekBy = ::seekBy,
+                        onBack = {
+                            saveProgress()
+                            onBack()
+                        },
+                        onRotate = {
+                            immersiveRequested = true
+                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                        },
+                        onPrevious = {
+                            saveProgress()
+                            playbackError = null
+                            viewModel.previousEpisode()
+                        },
+                        onNext = {
+                            saveProgress()
+                            playbackError = null
+                            viewModel.nextEpisode()
+                        },
+                        onRetry = ::retryPlayback,
+                        onNextLine = ::switchToNextLine,
+                        onShowEpisodes = { drawerVisible = true },
+                        onToggleLock = {
+                            val nextLocked = !controlsLocked
+                            controlsLocked = nextLocked
+                            controlsVisible = !nextLocked
+                        },
+                        onCycleResize = { resizeMode = resizeOptions.nextAfter(resizeMode).mode },
+                        onSpeedMenuExpandedChange = { speedMenuExpanded = it },
+                        onSelectSpeed = {
+                            player.setPlaybackSpeed(it)
+                            speedMenuExpanded = false
+                            controlsVisible = true
+                        },
+                        onBrightnessDelta = { delta ->
+                            brightnessLevel = (brightnessLevel + delta).coerceIn(0.05f, 1f)
+                            activity?.setScreenBrightness(brightnessLevel)
+                            gestureMessage = "亮度 ${(brightnessLevel * 100).roundToInt()}%"
+                        },
+                        onVolumeDelta = { delta ->
+                            volumeLevel = (volumeLevel + delta).coerceIn(0f, 1f)
+                            context.setMusicVolumeFraction(volumeLevel)
+                            gestureMessage = "音量 ${(volumeLevel * 100).roundToInt()}%"
+                        },
+                        onLongPressBoost = { active, originalSpeed ->
+                            longPressBoosting = active
+                            if (active) {
+                                player.setPlaybackSpeed(LONG_PRESS_SPEED)
+                                gestureMessage = "${formatSpeed(LONG_PRESS_SPEED)} 快速播放"
+                            } else {
+                                player.setPlaybackSpeed(originalSpeed)
+                                gestureMessage = null
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                    )
+                }
+
+                detail?.let {
+                    Surface(
+                        modifier = Modifier
+                            .widthIn(min = 320.dp, max = 390.dp)
+                            .fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(24.dp),
+                        shadowElevation = 1.dp,
+                        tonalElevation = 1.dp
+                    ) {
+                        PlayerQueuePanel(
+                            details = details,
+                            selectedDetailIndex = viewModel.detailIndex,
+                            selectedPlaySourceIndex = viewModel.playSourceIndex,
+                            selectedEpisodeIndex = viewModel.episodeIndex,
+                            onOpenDrawer = { drawerVisible = true },
+                            onSelectDetail = { index ->
+                                saveProgress()
+                                playbackError = null
+                                viewModel.selectDetail(index, keepEpisode = true)
+                            },
+                            onSelectPlaySource = { index ->
+                                saveProgress()
+                                playbackError = null
+                                viewModel.selectPlaySource(index)
+                            },
+                            onSelectEpisode = { index ->
+                                saveProgress()
+                                playbackError = null
+                                viewModel.selectEpisode(index)
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            }
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
                 PlayerSurface(
@@ -429,6 +574,7 @@ private fun PlayerContent(
                         onBack()
                     },
                     onRotate = {
+                        immersiveRequested = true
                         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     },
                     onPrevious = {
@@ -515,7 +661,7 @@ private fun PlayerContent(
                 selectedDetailIndex = viewModel.detailIndex,
                 selectedPlaySourceIndex = viewModel.playSourceIndex,
                 selectedEpisodeIndex = viewModel.episodeIndex,
-                isLandscape = isLandscape,
+                isLandscape = useFullscreen,
                 onDismiss = { drawerVisible = false },
                 onSelectDetail = { index ->
                     saveProgress()

@@ -2,10 +2,12 @@ package com.untr.medeo.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -32,6 +34,9 @@ import com.untr.medeo.data.local.AppSettings
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.data.local.SettingsStore
 import com.untr.medeo.data.repo.CacheUsage
+import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
+import com.untr.medeo.ui.adaptive.MedeoWindowClass
+import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.LoadingState
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -40,6 +45,7 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
+    windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state = viewModel.uiState
@@ -50,19 +56,185 @@ fun SettingsScreen(
         return
     }
 
-    LazyColumn(
+    if (windowClass == MedeoWindowClass.Expanded) {
+        TabletSettingsContent(
+            state = state,
+            settings = settings,
+            viewModel = viewModel,
+            windowClass = windowClass,
+            modifier = modifier
+        )
+    } else {
+        PhoneSettingsContent(
+            state = state,
+            settings = settings,
+            viewModel = viewModel,
+            windowClass = windowClass,
+            modifier = modifier
+        )
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun PhoneSettingsContent(
+    state: SettingsUiState,
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        AdaptiveWidthBox(
+            windowClass = windowClass,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            SettingsList(
+                state = state,
+                settings = settings,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun TabletSettingsContent(
+    state: SettingsUiState,
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        AdaptiveWidthBox(
+            windowClass = windowClass,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                SettingsTitle()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        item {
+                            SettingSwitchRow(
+                                title = "夜间模式",
+                                subtitle = if (settings.themeMode == AppThemeMode.NIGHT) {
+                                    "Tokyo Night"
+                                } else {
+                                    "Daylight"
+                                },
+                                checked = settings.themeMode == AppThemeMode.NIGHT,
+                                onCheckedChange = { enabled ->
+                                    viewModel.setThemeMode(if (enabled) AppThemeMode.NIGHT else AppThemeMode.DAY)
+                                }
+                            )
+                        }
+
+                        item {
+                            SettingSwitchRow(
+                                title = "仅 Wi-Fi 自动播放",
+                                subtitle = if (settings.wifiOnlyPlay) "已开启" else "已关闭",
+                                checked = settings.wifiOnlyPlay,
+                                onCheckedChange = viewModel::setWifiOnlyPlay
+                            )
+                        }
+
+                        item {
+                            CacheCard(
+                                settings = settings,
+                                usage = state.cacheUsage,
+                                clearing = state.clearingCache,
+                                message = state.message,
+                                onMediaCacheMbChange = viewModel::setMediaCacheMb,
+                                onImageCacheMbChange = viewModel::setImageCacheMb,
+                                onClear = viewModel::clearCache
+                            )
+                        }
+
+                        if (SHOW_REMOTE_SOURCE_SETTINGS) {
+                            item {
+                                SourceManifestSettings(
+                                    url = state.sourceManifestUrlDraft,
+                                    updatedAt = settings.remoteSourceManifestUpdatedAt,
+                                    refreshing = state.refreshingSources,
+                                    onUrlChange = viewModel::setSourceManifestUrlDraft,
+                                    onSave = viewModel::saveSourceManifestUrl,
+                                    onRefresh = viewModel::refreshRemoteSources,
+                                    onClear = viewModel::clearRemoteSources
+                                )
+                            }
+                        }
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        item {
+                            Text(
+                                text = "数据源",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 2.dp)
+                            )
+                        }
+
+                        items(state.sources, key = { it.id }) { source ->
+                            SourceRow(
+                                source = source,
+                                checked = source.id in settings.enabledSourceIds,
+                                onCheckedChange = { enabled ->
+                                    viewModel.setSourceEnabled(source.id, enabled)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun SettingsList(
+    state: SettingsUiState,
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier.background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text(
-                text = "设置",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-            )
+            SettingsTitle()
         }
 
         item {
@@ -133,6 +305,15 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun SettingsTitle() {
+    Text(
+        text = "设置",
+        style = MaterialTheme.typography.headlineSmall,
+        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+    )
 }
 
 private const val SHOW_REMOTE_SOURCE_SETTINGS = false

@@ -23,6 +23,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,6 +44,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.player.PlayerScreen
+import com.untr.medeo.ui.adaptive.MedeoWindowClass
+import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.MessageState
 import com.untr.medeo.ui.detail.DetailScreen
 import com.untr.medeo.ui.favorites.FavoritesScreen
@@ -83,11 +87,14 @@ private fun MedeoAppRoot(
 ) {
     val navController = rememberNavController()
     val startupState = startupViewModel.uiState
+    val windowClass = rememberMedeoWindowClass()
     val topLevelRoutes = listOf(Routes.HOME, Routes.FAVORITES, Routes.SETTINGS)
     val backStackEntry = navController.currentBackStackEntryAsState().value
     val currentDestination = backStackEntry?.destination
-    val showBottomBar = currentDestination?.hierarchy
+    val showTopLevelNavigation = currentDestination?.hierarchy
         ?.any { it.route in topLevelRoutes } == true
+    val showBottomBar = showTopLevelNavigation && windowClass == MedeoWindowClass.Compact
+    val showNavigationRail = showTopLevelNavigation && windowClass.usesWideLayout
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -107,57 +114,125 @@ private fun MedeoAppRoot(
             }
         }
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = Routes.HOME,
+        Row(
             modifier = Modifier
                 .padding(innerPadding)
                 .background(MaterialTheme.colorScheme.background)
+                .fillMaxSize()
         ) {
-            composable(Routes.HOME) {
-                HomeScreen(
-                    onOpenSearch = { navController.navigate(Routes.SEARCH) },
-                    onOpenDetail = { item ->
-                        navController.navigate(Routes.detail(item.sourceId, item.vodId))
+            if (showNavigationRail) {
+                MedeoNavigationRail(
+                    currentRoute = currentDestination?.route,
+                    onDestinationClick = { destination ->
+                        navController.navigate(destination.route) {
+                            popUpTo(Routes.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }
-            composable(Routes.SEARCH) {
-                SearchScreen(
-                    onBack = { navController.popBackStack() },
-                    onOpenDetail = { item ->
-                        navController.navigate(Routes.detail(item.sourceId, item.vodId))
-                    }
-                )
-            }
-            composable(Routes.FAVORITES) {
-                FavoritesScreen(
-                    onOpenDetail = { item ->
-                        navController.navigate(Routes.detail(item.sourceId, item.vodId))
-                    }
-                )
-            }
-            composable(Routes.SETTINGS) {
-                SettingsScreen()
-            }
-            composable(Routes.DETAIL_PATTERN) { backStackEntry ->
-                DetailScreen(
-                    onBack = { navController.popBackStack() },
-                    onPlay = { sourceId, vodId, playSourceIndex, episodeIndex ->
-                        navController.navigate(
-                            Routes.player(sourceId, vodId, playSourceIndex, episodeIndex)
-                        )
-                    }
-                )
-            }
-            composable(Routes.PLAYER_PATTERN) {
-                PlayerScreen(onBack = { navController.popBackStack() })
+
+            NavHost(
+                navController = navController,
+                startDestination = Routes.HOME,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
+                composable(Routes.HOME) {
+                    HomeScreen(
+                        windowClass = windowClass,
+                        onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                        onOpenDetail = { item ->
+                            navController.navigate(Routes.detail(item.sourceId, item.vodId))
+                        }
+                    )
+                }
+                composable(Routes.SEARCH) {
+                    SearchScreen(
+                        windowClass = windowClass,
+                        onBack = { navController.popBackStack() },
+                        onOpenDetail = { item ->
+                            navController.navigate(Routes.detail(item.sourceId, item.vodId))
+                        }
+                    )
+                }
+                composable(Routes.FAVORITES) {
+                    FavoritesScreen(
+                        windowClass = windowClass,
+                        onOpenDetail = { item ->
+                            navController.navigate(Routes.detail(item.sourceId, item.vodId))
+                        }
+                    )
+                }
+                composable(Routes.SETTINGS) {
+                    SettingsScreen(windowClass = windowClass)
+                }
+                composable(Routes.DETAIL_PATTERN) {
+                    DetailScreen(
+                        windowClass = windowClass,
+                        onBack = { navController.popBackStack() },
+                        onPlay = { sourceId, vodId, playSourceIndex, episodeIndex ->
+                            navController.navigate(
+                                Routes.player(sourceId, vodId, playSourceIndex, episodeIndex)
+                            )
+                        }
+                    )
+                }
+                composable(Routes.PLAYER_PATTERN) {
+                    PlayerScreen(
+                        windowClass = windowClass,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
             }
         }
     }
 
     if (!startupState.loading && !startupState.disclaimerAccepted) {
         DisclaimerDialog(onAccept = startupViewModel::acceptDisclaimer)
+    }
+}
+
+@Composable
+private fun MedeoNavigationRail(
+    currentRoute: String?,
+    onDestinationClick: (TopLevelDestination) -> Unit
+) {
+    NavigationRail(
+        containerColor = MaterialTheme.colorScheme.background,
+        modifier = Modifier.width(92.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TopLevelDestination.entries.forEach { destination ->
+                val selected = currentRoute == destination.route
+                NavigationRailItem(
+                    selected = selected,
+                    onClick = { onDestinationClick(destination) },
+                    icon = {
+                        Icon(
+                            painter = painterResource(destination.iconRes),
+                            contentDescription = destination.label,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = destination.label,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                )
+            }
+        }
     }
 }
 

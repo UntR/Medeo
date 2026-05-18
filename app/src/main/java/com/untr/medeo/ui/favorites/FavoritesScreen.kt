@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -29,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.untr.medeo.R
 import com.untr.medeo.data.model.VodItem
+import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
+import com.untr.medeo.ui.adaptive.MedeoWindowClass
+import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.LoadingState
 import com.untr.medeo.ui.components.MessageState
 import com.untr.medeo.ui.components.VodListRow
@@ -37,6 +42,7 @@ import com.untr.medeo.ui.components.VodListRow
 fun FavoritesScreen(
     onOpenDetail: (VodItem) -> Unit,
     modifier: Modifier = Modifier,
+    windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
     viewModel: FavoritesViewModel = hiltViewModel()
 ) {
     val state = viewModel.uiState
@@ -45,49 +51,216 @@ fun FavoritesScreen(
     when {
         state.loading -> LoadingState("正在加载收藏", modifier)
         !hasContent -> MessageState("暂无收藏和最近观看", modifier)
-        else -> Column(
+        else -> FavoritesContent(
+            state = state,
+            onOpenDetail = { item ->
+                viewModel.rememberForDetail(item)
+                onOpenDetail(item)
+            },
+            onDeleteRecent = viewModel::deleteRecent,
+            windowClass = windowClass,
             modifier = modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+        )
+    }
+}
+
+@Composable
+private fun FavoritesContent(
+    state: FavoritesUiState,
+    onOpenDetail: (VodItem) -> Unit,
+    onDeleteRecent: (VodItem) -> Unit,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    if (windowClass == MedeoWindowClass.Expanded) {
+        TabletFavoritesContent(
+            state = state,
+            onOpenDetail = onOpenDetail,
+            onDeleteRecent = onDeleteRecent,
+            windowClass = windowClass,
+            modifier = modifier
+        )
+    } else {
+        PhoneFavoritesContent(
+            state = state,
+            onOpenDetail = onOpenDetail,
+            onDeleteRecent = onDeleteRecent,
+            windowClass = windowClass,
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+private fun PhoneFavoritesContent(
+    state: FavoritesUiState,
+    onOpenDetail: (VodItem) -> Unit,
+    onDeleteRecent: (VodItem) -> Unit,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        AdaptiveWidthBox(
+            windowClass = windowClass,
+            modifier = Modifier.fillMaxSize()
         ) {
-            Text(
-                text = "收藏",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp)
-            )
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                if (state.recentItems.isNotEmpty()) {
-                    item {
-                        SectionHeader("最近观看")
+            Column(modifier = Modifier.fillMaxSize()) {
+                FavoritesTitle()
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    if (state.recentItems.isNotEmpty()) {
+                        item {
+                            SectionHeader("最近观看")
+                        }
+                        items(state.recentItems, key = { "recent-${it.key}" }) { item ->
+                            RecentWatchRow(
+                                item = item,
+                                onClick = onOpenDetail,
+                                onDelete = onDeleteRecent
+                            )
+                        }
                     }
-                    items(state.recentItems, key = { "recent-${it.key}" }) { item ->
-                        RecentWatchRow(
+                    if (state.items.isNotEmpty()) {
+                        item {
+                            SectionHeader("我的收藏")
+                        }
+                    }
+                    items(state.items, key = { "favorite-${it.key}" }) { item ->
+                        VodListRow(
                             item = item,
-                            onClick = { selected ->
-                                viewModel.rememberForDetail(selected)
-                                onOpenDetail(selected)
-                            },
-                            onDelete = viewModel::deleteRecent
+                            onClick = onOpenDetail
                         )
                     }
                 }
-                if (state.items.isNotEmpty()) {
-                    item {
-                        SectionHeader("我的收藏")
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletFavoritesContent(
+    state: FavoritesUiState,
+    onOpenDetail: (VodItem) -> Unit,
+    onDeleteRecent: (VodItem) -> Unit,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        AdaptiveWidthBox(
+            windowClass = windowClass,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                FavoritesTitle()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    if (state.recentItems.isNotEmpty()) {
+                        RecentPanel(
+                            items = state.recentItems,
+                            onOpenDetail = onOpenDetail,
+                            onDeleteRecent = onDeleteRecent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        )
+                    }
+                    if (state.items.isNotEmpty()) {
+                        FavoritePanel(
+                            items = state.items,
+                            onOpenDetail = onOpenDetail,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        )
                     }
                 }
-                items(state.items, key = { "favorite-${it.key}" }) { item ->
-                    VodListRow(
-                        item = item,
-                        onClick = {
-                            viewModel.rememberForDetail(item)
-                            onOpenDetail(item)
-                        }
-                    )
-                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoritesTitle() {
+    Text(
+        text = "收藏",
+        style = MaterialTheme.typography.headlineSmall,
+        modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp)
+    )
+}
+
+@Composable
+private fun RecentPanel(
+    items: List<VodItem>,
+    onOpenDetail: (VodItem) -> Unit,
+    onDeleteRecent: (VodItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 1.dp,
+        shadowElevation = 1.dp
+    ) {
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            item {
+                SectionHeader("最近观看")
+            }
+            items(items, key = { "recent-panel-${it.key}" }) { item ->
+                RecentWatchRow(
+                    item = item,
+                    onClick = onOpenDetail,
+                    onDelete = onDeleteRecent
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoritePanel(
+    items: List<VodItem>,
+    onOpenDetail: (VodItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 1.dp,
+        shadowElevation = 1.dp
+    ) {
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            item {
+                SectionHeader("我的收藏")
+            }
+            items(items, key = { "favorite-panel-${it.key}" }) { item ->
+                VodListRow(
+                    item = item,
+                    onClick = onOpenDetail
+                )
             }
         }
     }

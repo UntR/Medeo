@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -36,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,6 +46,9 @@ import com.untr.medeo.R
 import com.untr.medeo.data.model.HotFilter
 import com.untr.medeo.data.model.HotListItem
 import com.untr.medeo.data.model.VodItem
+import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
+import com.untr.medeo.ui.adaptive.MedeoWindowClass
+import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.InstantTabItem
 import com.untr.medeo.ui.components.InstantTabRow
 import com.untr.medeo.ui.components.LoadingState
@@ -56,6 +61,7 @@ fun HomeScreen(
     onOpenSearch: () -> Unit,
     onOpenDetail: (VodItem) -> Unit,
     modifier: Modifier = Modifier,
+    windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val state = viewModel.uiState
@@ -66,39 +72,57 @@ fun HomeScreen(
         }
     }
 
+    if (windowClass == MedeoWindowClass.Compact) {
+        PhoneHomeContent(
+            state = state,
+            onOpenSearch = onOpenSearch,
+            onSelectCategory = viewModel::selectCategory,
+            onSelectType = viewModel::selectType,
+            onRefresh = viewModel::refresh,
+            onOpenItem = viewModel::openHotItem,
+            modifier = modifier
+        )
+    } else {
+        TabletHomeContent(
+            state = state,
+            onOpenSearch = onOpenSearch,
+            onSelectCategory = viewModel::selectCategory,
+            onSelectType = viewModel::selectType,
+            onRefresh = viewModel::refresh,
+            onOpenItem = viewModel::openHotItem,
+            windowClass = windowClass,
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+private fun PhoneHomeContent(
+    state: HomeUiState,
+    onOpenSearch: () -> Unit,
+    onSelectCategory: (String) -> Unit,
+    onSelectType: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onOpenItem: (HotListItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 22.dp, vertical = 18.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            MedeoLogo()
-            IconButton(onClick = onOpenSearch) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_search),
-                    contentDescription = "搜索",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(30.dp)
-                )
-            }
-        }
+        HomeHeader(onOpenSearch = onOpenSearch)
 
         HotCategoryTabs(
             filters = state.categoryFilters,
             selectedCategory = state.selectedCategory,
-            onSelected = viewModel::selectCategory
+            onSelected = onSelectCategory
         )
 
         HotTypeRow(
             filters = state.typeFilters,
             selectedType = state.selectedType,
-            onSelected = viewModel::selectType
+            onSelected = onSelectType
         )
 
         state.lookupMessage?.let { message ->
@@ -115,13 +139,117 @@ fun HomeScreen(
             state.error != null -> MessageState(
                 message = state.error,
                 actionLabel = "重新加载",
-                onAction = { viewModel.refresh() }
+                onAction = onRefresh
             )
             else -> HotRankedList(
                 items = state.items,
                 resolvingItemId = state.resolvingItemId,
-                onOpenItem = viewModel::openHotItem,
+                onOpenItem = onOpenItem,
                 modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+@Composable
+private fun TabletHomeContent(
+    state: HomeUiState,
+    onOpenSearch: () -> Unit,
+    onSelectCategory: (String) -> Unit,
+    onSelectType: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onOpenItem: (HotListItem) -> Unit,
+    windowClass: MedeoWindowClass,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        AdaptiveWidthBox(
+            windowClass = windowClass,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 14.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                HomeHeader(onOpenSearch = onOpenSearch)
+                HotCategoryTabs(
+                    filters = state.categoryFilters,
+                    selectedCategory = state.selectedCategory,
+                    onSelected = onSelectCategory
+                )
+                HotTypeRow(
+                    filters = state.typeFilters,
+                    selectedType = state.selectedType,
+                    onSelected = onSelectType
+                )
+
+                state.lookupMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+                    )
+                }
+
+                when {
+                    state.loading -> LoadingState("正在加载热榜", Modifier.weight(1f))
+                    state.error != null -> MessageState(
+                        message = state.error,
+                        modifier = Modifier.weight(1f),
+                        actionLabel = "重新加载",
+                        onAction = onRefresh
+                    )
+                    else -> Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        HotRankedList(
+                            items = state.items,
+                            resolvingItemId = state.resolvingItemId,
+                            onOpenItem = onOpenItem,
+                            modifier = Modifier
+                                .weight(1.08f)
+                                .fillMaxHeight()
+                        )
+                        HotListSidePanel(
+                            items = state.items,
+                            resolvingItemId = state.resolvingItemId,
+                            onOpenItem = onOpenItem,
+                            modifier = Modifier
+                                .weight(0.92f)
+                                .fillMaxHeight()
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeHeader(
+    onOpenSearch: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 18.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MedeoLogo()
+        IconButton(onClick = onOpenSearch) {
+            Icon(
+                painter = painterResource(R.drawable.ic_search),
+                contentDescription = "搜索",
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(30.dp)
             )
         }
     }
@@ -150,6 +278,101 @@ private fun MedeoLogo() {
             text = "Medeo",
             style = MaterialTheme.typography.headlineSmall
         )
+    }
+}
+
+@Composable
+private fun HotListSidePanel(
+    items: List<HotListItem>,
+    resolvingItemId: String?,
+    onOpenItem: (HotListItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(24.dp),
+        shadowElevation = 1.dp,
+        tonalElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "热榜快览",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            items.take(5).forEachIndexed { index, item ->
+                HotCompactRow(
+                    item = item.copy(rank = index + 1),
+                    resolving = resolvingItemId == item.id,
+                    onClick = { onOpenItem(item) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HotCompactRow(
+    item: HotListItem,
+    resolving: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(enabled = !resolving, onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RankLabel(rank = item.rank)
+        AsyncImage(
+            model = rememberMedeoImageRequest(item.posterUrl),
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .padding(start = 10.dp)
+                .width(52.dp)
+                .aspectRatio(3f / 4f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 10.dp)
+        ) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = item.displaySubtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 3.dp)
+            )
+        }
+        if (resolving) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Text(
+                text = item.displayRating,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
     }
 }
 
@@ -207,12 +430,14 @@ private fun HotTypeChip(
             .background(if (selected) colorScheme.primary else colorScheme.surface)
             .clickable(onClick = onClick)
             .heightIn(min = 40.dp)
-            .padding(horizontal = 16.dp, vertical = 9.dp)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelLarge,
             color = if (selected) colorScheme.onPrimary else colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
             maxLines = 1
         )
     }

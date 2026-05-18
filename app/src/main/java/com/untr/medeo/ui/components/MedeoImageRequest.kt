@@ -9,7 +9,7 @@ import coil3.request.ImageRequest
 
 private const val IMAGE_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/v0.1"
+        "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/v0.1.2"
 
 @Composable
 fun rememberMedeoImageRequest(url: String?): ImageRequest {

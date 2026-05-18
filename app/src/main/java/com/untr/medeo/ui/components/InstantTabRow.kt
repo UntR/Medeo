@@ -20,10 +20,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -83,12 +85,14 @@ fun InstantTabRow(
                         onClick = { onSelected(index) }
                     )
                     .semantics { this.selected = selected }
-                    .padding(horizontal = 18.dp, vertical = 11.dp)
+                    .padding(horizontal = 18.dp, vertical = 11.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = item.label,
                     color = contentColor,
                     style = MaterialTheme.typography.labelLarge,
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
