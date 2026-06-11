@@ -33,6 +33,7 @@ data class HomeUiState(
     val selectedType: String = DEFAULT_HOT_TYPE,
     val resolvingItemId: String? = null,
     val lookupMessage: String? = null,
+    val manualSearchQuery: String? = null,
     val error: String? = null
 )
 
@@ -69,6 +70,7 @@ class HomeViewModel @Inject constructor(
                     selectedType = type,
                     resolvingItemId = null,
                     lookupMessage = null,
+                    manualSearchQuery = null,
                     error = "当前无网络连接，无法加载热榜"
                 )
                 return@launch
@@ -79,6 +81,7 @@ class HomeViewModel @Inject constructor(
                 selectedCategory = category,
                 selectedType = type,
                 lookupMessage = null,
+                manualSearchQuery = null,
                 error = null
             )
             val result = hotListRepository.recentHot(category = category, type = type)
@@ -113,14 +116,16 @@ class HomeViewModel @Inject constructor(
             if (!networkMonitor.snapshot().online) {
                 uiState = uiState.copy(
                     resolvingItemId = null,
-                    lookupMessage = "当前无网络连接，无法匹配可播放源"
+                    lookupMessage = "当前无网络连接，无法匹配可播放源",
+                    manualSearchQuery = null
                 )
                 return@launch
             }
 
             uiState = uiState.copy(
                 resolvingItemId = item.id,
-                lookupMessage = "正在匹配《${item.title}》的可播放源"
+                lookupMessage = "正在匹配《${item.title}》的可播放源",
+                manualSearchQuery = null
             )
 
             val matched = searchRepository.search(item.title)
@@ -129,7 +134,8 @@ class HomeViewModel @Inject constructor(
             if (matched == null) {
                 uiState = uiState.copy(
                     resolvingItemId = null,
-                    lookupMessage = "可播放源暂时没有可靠匹配到《${item.title}》，请使用搜索页手动确认"
+                    lookupMessage = "可播放源暂时没有可靠匹配到《${item.title}》",
+                    manualSearchQuery = item.title
                 )
                 return@launch
             }
@@ -137,7 +143,8 @@ class HomeViewModel @Inject constructor(
             detailSelectionStore.remember(matched)
             uiState = uiState.copy(
                 resolvingItemId = null,
-                lookupMessage = null
+                lookupMessage = null,
+                manualSearchQuery = null
             )
             _openDetailEvents.emit(matched.primary)
         }

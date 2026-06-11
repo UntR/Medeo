@@ -38,6 +38,51 @@ data class PlayerUiState(
         detail(detailIndex)?.playSources?.getOrNull(playSourceIndex)
     fun episode(detailIndex: Int, playSourceIndex: Int, episodeIndex: Int): Episode? =
         playSource(detailIndex, playSourceIndex)?.episodes?.getOrNull(episodeIndex)
+    fun hasNextEpisode(detailIndex: Int, playSourceIndex: Int, episodeIndex: Int): Boolean {
+        val source = playSource(detailIndex, playSourceIndex) ?: return false
+        return episodeIndex < source.episodes.lastIndex
+    }
+}
+
+internal const val RESUME_PLAYBACK_INDEX = -1
+
+internal data class PlaybackSelection(
+    val playSourceIndex: Int,
+    val episodeIndex: Int
+)
+
+internal fun resolvePlaybackSelection(
+    detail: VodDetail?,
+    requestedPlaySourceIndex: Int,
+    requestedEpisodeIndex: Int,
+    progress: WatchProgress?
+): PlaybackSelection {
+    val playSources = detail?.playSources.orEmpty()
+    if (playSources.isEmpty()) return PlaybackSelection(0, 0)
+
+    if (
+        progress != null &&
+        (requestedPlaySourceIndex == RESUME_PLAYBACK_INDEX || requestedEpisodeIndex == RESUME_PLAYBACK_INDEX)
+    ) {
+        val progressPlaySourceIndex = playSources
+            .indexOfFirst { source -> source.name == progress.playSourceName }
+            .takeIf { it >= 0 }
+            ?: 0
+        val progressSource = playSources[progressPlaySourceIndex]
+        return PlaybackSelection(
+            playSourceIndex = progressPlaySourceIndex,
+            episodeIndex = progress.episodeIndex.coerceIn(0, progressSource.episodes.lastIndex)
+        )
+    }
+
+    val safePlaySourceIndex = requestedPlaySourceIndex
+        .coerceAtLeast(0)
+        .coerceAtMost(playSources.lastIndex)
+    val safeEpisodeIndex = requestedEpisodeIndex
+        .coerceAtLeast(0)
+        .coerceAtMost(playSources[safePlaySourceIndex].episodes.lastIndex)
+
+    return PlaybackSelection(safePlaySourceIndex, safeEpisodeIndex)
 }
 
 @UnstableApi
@@ -54,14 +99,18 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
     private val sourceId: String = savedStateHandle["sourceId"] ?: ""
     private val vodId: Long = savedStateHandle.get<String>("vodId")?.toLongOrNull() ?: -1L
+    private val requestedPlaySourceIndex =
+        savedStateHandle.get<String>("playSourceIndex")?.toIntOrNull() ?: 0
+    private val requestedEpisodeIndex =
+        savedStateHandle.get<String>("episodeIndex")?.toIntOrNull() ?: 0
 
     var playSourceIndex by mutableIntStateOf(
-        savedStateHandle.get<String>("playSourceIndex")?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        requestedPlaySourceIndex.coerceAtLeast(0)
     )
         private set
 
     var episodeIndex by mutableIntStateOf(
-        savedStateHandle.get<String>("episodeIndex")?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        requestedEpisodeIndex.coerceAtLeast(0)
     )
         private set
 
@@ -219,10 +268,22 @@ class PlayerViewModel @Inject constructor(
                 detail.item.sourceId == sourceId && detail.item.vodId == vodId
             }.takeIf { it >= 0 } ?: 0
             val selectedDetail = details.getOrNull(detailIndex)
-            playSourceIndex = playSourceIndex.coerceAtMost(selectedDetail?.playSources?.lastIndex ?: 0)
-            episodeIndex = episodeIndex.coerceAtMost(
-                selectedDetail?.playSources?.getOrNull(playSourceIndex)?.episodes?.lastIndex ?: 0
+            val progress = if (
+                requestedPlaySourceIndex == RESUME_PLAYBACK_INDEX ||
+                requestedEpisodeIndex == RESUME_PLAYBACK_INDEX
+            ) {
+                progressRepository.observeProgress("$sourceId|$vodId").first()
+            } else {
+                null
+            }
+            val selection = resolvePlaybackSelection(
+                detail = selectedDetail,
+                requestedPlaySourceIndex = requestedPlaySourceIndex,
+                requestedEpisodeIndex = requestedEpisodeIndex,
+                progress = progress
             )
+            playSourceIndex = selection.playSourceIndex
+            episodeIndex = selection.episodeIndex
             uiState = PlayerUiState(
                 loading = false,
                 details = details,

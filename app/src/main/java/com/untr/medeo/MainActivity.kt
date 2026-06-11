@@ -37,11 +37,13 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
+import androidx.navigation.NavType
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.player.PlayerScreen
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
@@ -144,13 +146,22 @@ private fun MedeoAppRoot(
                 composable(Routes.HOME) {
                     HomeScreen(
                         windowClass = windowClass,
-                        onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                        onOpenSearch = { query -> navController.navigate(Routes.search(query)) },
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
                         }
                     )
                 }
-                composable(Routes.SEARCH) {
+                composable(
+                    route = Routes.SEARCH_PATTERN,
+                    arguments = listOf(
+                        navArgument("query") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        }
+                    )
+                ) {
                     SearchScreen(
                         windowClass = windowClass,
                         onBack = { navController.popBackStack() },
@@ -164,6 +175,9 @@ private fun MedeoAppRoot(
                         windowClass = windowClass,
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
+                        },
+                        onContinueRecent = { item ->
+                            navController.navigate(Routes.resumePlayer(item.sourceId, item.vodId))
                         }
                     )
                 }

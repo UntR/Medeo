@@ -161,6 +161,7 @@ private fun PlayerContent(
     var speedMenuExpanded by remember { mutableStateOf(false) }
     var gestureMessage by remember { mutableStateOf<String?>(null) }
     var autoPlayNoticeVisible by remember(episodeUrl, autoPlayBlocked) { mutableStateOf(autoPlayBlocked) }
+    var playbackEndHandled by remember(episodeUrl) { mutableStateOf(false) }
     var longPressBoosting by remember { mutableStateOf(false) }
     var resizeMode by rememberSaveable { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var brightnessLevel by remember(activity) {
@@ -302,6 +303,21 @@ private fun PlayerContent(
 
             override fun onPlaybackStateChanged(playbackStateValue: Int) {
                 playbackState = playbackStateValue
+                if (
+                    playbackStateValue == Player.STATE_ENDED &&
+                    !playbackEndHandled &&
+                    viewModel.uiState.hasNextEpisode(
+                        viewModel.detailIndex,
+                        viewModel.playSourceIndex,
+                        viewModel.episodeIndex
+                    )
+                ) {
+                    playbackEndHandled = true
+                    saveProgress()
+                    playbackError = null
+                    viewModel.nextEpisode()
+                    controlsVisible = true
+                }
             }
 
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {

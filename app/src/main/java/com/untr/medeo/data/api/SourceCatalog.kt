@@ -2,6 +2,7 @@ package com.untr.medeo.data.api
 
 import com.untr.medeo.data.local.SettingsStore
 import com.squareup.moshi.Json
+import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import javax.inject.Inject
@@ -20,12 +21,7 @@ class SourceCatalog @Inject constructor(
 
     val sources: Flow<List<VodSource>> = settingsStore.settings
         .map { settings ->
-            val remoteManifestJson = if (REMOTE_SOURCE_MANIFEST_ENABLED) {
-                settings.remoteSourceManifestJson
-            } else {
-                null
-            }
-            mergeSources(remoteManifestJson)
+            mergeSources(settings.remoteSourceManifestJson)
         }
 
     suspend fun sources(): List<VodSource> =
@@ -46,21 +42,32 @@ class SourceCatalog @Inject constructor(
     }
 
     private fun mergeSources(remoteManifestJson: String?): List<VodSource> {
-        val merged = linkedMapOf<String, VodSource>()
-        BUILTIN_SOURCES.forEach { source -> merged[source.id] = source }
-
-        parseManifest(remoteManifestJson)
-            ?.sources
-            ?.mapNotNull { dto -> dto.toVodSource() }
-            ?.forEach { source -> merged[source.id] = source }
-
-        return merged.values.toList()
+        return mergeVodSources(
+            builtinSources = BUILTIN_SOURCES,
+            remoteManifestJson = remoteManifestJson,
+            manifestAdapter = manifestAdapter
+        )
     }
+}
 
-    private fun parseManifest(rawJson: String?): RemoteSourceManifest? {
-        val json = rawJson?.takeIf { it.isNotBlank() } ?: return null
-        return runCatching { manifestAdapter.fromJson(json) }.getOrNull()
+internal fun mergeVodSources(
+    builtinSources: List<VodSource>,
+    remoteManifestJson: String?,
+    manifestAdapter: JsonAdapter<RemoteSourceManifest>
+): List<VodSource> {
+    val merged = linkedMapOf<String, VodSource>()
+    builtinSources.forEach { source -> merged[source.id] = source }
+
+    val json = remoteManifestJson?.takeIf { it.isNotBlank() }
+    val remoteManifest = json?.let { rawJson ->
+        runCatching { manifestAdapter.fromJson(rawJson) }.getOrNull()
     }
+    remoteManifest
+        ?.sources
+        ?.mapNotNull { dto -> dto.toVodSource() }
+        ?.forEach { source -> merged[source.id] = source }
+
+    return merged.values.toList()
 }
 
 @JsonClass(generateAdapter = true)
@@ -105,4 +112,3 @@ data class RemoteVodSource(
 
 private val SOURCE_ID_PATTERN = Regex("[A-Za-z0-9_-]{2,32}")
 
-private const val REMOTE_SOURCE_MANIFEST_ENABLED = false

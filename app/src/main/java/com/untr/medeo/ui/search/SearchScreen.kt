@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.untr.medeo.R
+import com.untr.medeo.data.model.AggregatedResult
 import com.untr.medeo.data.model.VodItem
 import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
@@ -57,7 +59,6 @@ fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val state = viewModel.uiState
-    val items = state.results.map { it.primary }
     val openDetail: (VodItem) -> Unit = { item ->
         viewModel.rememberForDetail(item)
         onOpenDetail(item)
@@ -66,7 +67,7 @@ fun SearchScreen(
     if (windowClass == MedeoWindowClass.Expanded) {
         TabletSearchContent(
             state = state,
-            items = items,
+            results = state.results,
             onBack = onBack,
             onOpenDetail = openDetail,
             onQueryChange = viewModel::onQueryChange,
@@ -80,7 +81,7 @@ fun SearchScreen(
     } else {
         PhoneSearchContent(
             state = state,
-            items = items,
+            results = state.results,
             onBack = onBack,
             onOpenDetail = openDetail,
             onQueryChange = viewModel::onQueryChange,
@@ -97,7 +98,7 @@ fun SearchScreen(
 @Composable
 private fun PhoneSearchContent(
     state: SearchUiState,
-    items: List<VodItem>,
+    results: List<AggregatedResult>,
     onBack: () -> Unit,
     onOpenDetail: (VodItem) -> Unit,
     onQueryChange: (String) -> Unit,
@@ -127,7 +128,7 @@ private fun PhoneSearchContent(
                 SearchProgress(state = state)
                 SearchBody(
                     state = state,
-                    items = items,
+                    results = results,
                     onOpenDetail = onOpenDetail,
                     onRetry = onRetry,
                     onHistoryClick = onHistoryClick,
@@ -142,7 +143,7 @@ private fun PhoneSearchContent(
 @Composable
 private fun TabletSearchContent(
     state: SearchUiState,
-    items: List<VodItem>,
+    results: List<AggregatedResult>,
     onBack: () -> Unit,
     onOpenDetail: (VodItem) -> Unit,
     onQueryChange: (String) -> Unit,
@@ -182,7 +183,7 @@ private fun TabletSearchContent(
                     SearchProgress(state = state)
                     SearchBody(
                         state = state,
-                        items = items,
+                        results = results,
                         onOpenDetail = onOpenDetail,
                         onRetry = onRetry,
                         onHistoryClick = onHistoryClick,
@@ -191,9 +192,9 @@ private fun TabletSearchContent(
                     )
                 }
                 SearchPreviewPanel(
-                    item = items.firstOrNull(),
+                    item = results.firstOrNull()?.primary,
                     submittedQuery = state.submittedQuery,
-                    resultCount = items.size,
+                    resultCount = results.size,
                     onOpenDetail = onOpenDetail,
                     modifier = Modifier
                         .weight(0.88f)
@@ -281,7 +282,7 @@ private fun SearchProgress(state: SearchUiState) {
 @Composable
 private fun SearchBody(
     state: SearchUiState,
-    items: List<VodItem>,
+    results: List<AggregatedResult>,
     onOpenDetail: (VodItem) -> Unit,
     onRetry: () -> Unit,
     onHistoryClick: (String) -> Unit,
@@ -295,8 +296,8 @@ private fun SearchBody(
             actionLabel = "重试",
             onAction = onRetry
         )
-        items.isNotEmpty() -> SearchResultList(
-            items = items,
+        results.isNotEmpty() -> SearchResultList(
+            results = results,
             onOpenDetail = onOpenDetail,
             modifier = modifier
         )
@@ -430,7 +431,7 @@ private fun SearchHistoryList(
 
 @Composable
 private fun SearchResultList(
-    items: List<VodItem>,
+    results: List<AggregatedResult>,
     onOpenDetail: (VodItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -439,11 +440,83 @@ private fun SearchResultList(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
     ) {
-        items(items, key = { it.key }) { item ->
-            VodListRow(
-                item = item,
+        items(results, key = { it.dedupKey }) { result ->
+            SearchResultCard(
+                result = result,
                 onClick = onOpenDetail
             )
         }
+    }
+}
+
+@Composable
+private fun SearchResultCard(
+    result: AggregatedResult,
+    onClick: (VodItem) -> Unit
+) {
+    Column {
+        VodListRow(
+            item = result.primary,
+            onClick = onClick
+        )
+        if (result.perSource.size > 1) {
+            SourceOptionRow(
+                result = result,
+                onClick = onClick,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceOptionRow(
+    result: AggregatedResult,
+    onClick: (VodItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)
+    ) {
+        items(result.perSource, key = { it.key }) { item ->
+            SourceOptionChip(
+                item = item,
+                selected = item.key == result.primary.key,
+                onClick = { onClick(item) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceOptionChip(
+    item: VodItem,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        contentColor = if (selected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        shape = RoundedCornerShape(999.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Text(
+            text = item.sourceName,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+        )
     }
 }

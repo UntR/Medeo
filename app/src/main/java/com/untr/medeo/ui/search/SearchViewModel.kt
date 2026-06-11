@@ -3,6 +3,7 @@ package com.untr.medeo.ui.search
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.untr.medeo.data.model.VodItem
@@ -29,6 +30,7 @@ data class SearchUiState(
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
     private val searchRepository: SearchRepository,
     private val detailSelectionStore: DetailSelectionStore,
     private val networkMonitor: NetworkMonitor,
@@ -40,10 +42,15 @@ class SearchViewModel @Inject constructor(
     private var searchJob: Job? = null
 
     init {
+        val initialQuery = savedStateHandle.get<String>("query").orEmpty()
         viewModelScope.launch {
             settingsStore.searchHistory.collect { history ->
                 uiState = uiState.copy(history = history)
             }
+        }
+        if (initialQuery.isNotBlank()) {
+            uiState = uiState.copy(query = initialQuery)
+            submitSearch(initialQuery)
         }
     }
 
@@ -131,7 +138,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun rememberForDetail(item: VodItem) {
-        val result = uiState.results.firstOrNull { it.primary.key == item.key }
+        val result = uiState.results.matchingResultFor(item)
         if (result != null) {
             detailSelectionStore.remember(result)
         } else {
@@ -139,3 +146,6 @@ class SearchViewModel @Inject constructor(
         }
     }
 }
+
+internal fun List<AggregatedResult>.matchingResultFor(item: VodItem): AggregatedResult? =
+    firstOrNull { result -> result.perSource.any { candidate -> candidate.key == item.key } }

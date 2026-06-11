@@ -29,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -58,7 +59,7 @@ import java.util.Locale
 
 @Composable
 fun HomeScreen(
-    onOpenSearch: () -> Unit,
+    onOpenSearch: (String?) -> Unit,
     onOpenDetail: (VodItem) -> Unit,
     modifier: Modifier = Modifier,
     windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
@@ -99,7 +100,7 @@ fun HomeScreen(
 @Composable
 private fun PhoneHomeContent(
     state: HomeUiState,
-    onOpenSearch: () -> Unit,
+    onOpenSearch: (String?) -> Unit,
     onSelectCategory: (String) -> Unit,
     onSelectType: (String) -> Unit,
     onRefresh: () -> Unit,
@@ -111,7 +112,7 @@ private fun PhoneHomeContent(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        HomeHeader(onOpenSearch = onOpenSearch)
+        HomeHeader(onOpenSearch = { onOpenSearch(null) })
 
         HotCategoryTabs(
             filters = state.categoryFilters,
@@ -126,10 +127,10 @@ private fun PhoneHomeContent(
         )
 
         state.lookupMessage?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            LookupMessage(
+                message = message,
+                manualSearchQuery = state.manualSearchQuery,
+                onOpenSearch = onOpenSearch,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
@@ -154,7 +155,7 @@ private fun PhoneHomeContent(
 @Composable
 private fun TabletHomeContent(
     state: HomeUiState,
-    onOpenSearch: () -> Unit,
+    onOpenSearch: (String?) -> Unit,
     onSelectCategory: (String) -> Unit,
     onSelectType: (String) -> Unit,
     onRefresh: () -> Unit,
@@ -174,7 +175,7 @@ private fun TabletHomeContent(
                 .padding(horizontal = 24.dp, vertical = 14.dp)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                HomeHeader(onOpenSearch = onOpenSearch)
+                HomeHeader(onOpenSearch = { onOpenSearch(null) })
                 HotCategoryTabs(
                     filters = state.categoryFilters,
                     selectedCategory = state.selectedCategory,
@@ -187,10 +188,10 @@ private fun TabletHomeContent(
                 )
 
                 state.lookupMessage?.let { message ->
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    LookupMessage(
+                        message = message,
+                        manualSearchQuery = state.manualSearchQuery,
+                        onOpenSearch = onOpenSearch,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
                     )
                 }
@@ -251,6 +252,32 @@ private fun HomeHeader(
                 tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(30.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun LookupMessage(
+    message: String,
+    manualSearchQuery: String?,
+    onOpenSearch: (String?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        if (!manualSearchQuery.isNullOrBlank()) {
+            TextButton(onClick = { onOpenSearch(manualSearchQuery) }) {
+                Text("去搜索")
+            }
         }
     }
 }

@@ -316,7 +316,7 @@ private fun SettingsTitle() {
     )
 }
 
-private const val SHOW_REMOTE_SOURCE_SETTINGS = false
+private const val SHOW_REMOTE_SOURCE_SETTINGS = true
 
 @Composable
 private fun SourceManifestSettings(
