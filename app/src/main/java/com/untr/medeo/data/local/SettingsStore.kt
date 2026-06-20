@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.untr.medeo.data.api.DEFAULT_ENABLED_SOURCE_IDS
+import com.squareup.moshi.Moshi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -43,8 +44,11 @@ enum class AppThemeMode {
 
 @Singleton
 class SettingsStore @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    moshi: Moshi
 ) {
+    private val hotListCacheAdapter = moshi.adapter(HotListCachePayload::class.java)
+
     val settings: Flow<AppSettings> = context.settingsDataStore.data
         .map { preferences ->
             AppSettings(
@@ -161,6 +165,17 @@ class SettingsStore @Inject constructor(
         }
     }
 
+    suspend fun hotListCache(): HotListCachePayload? =
+        context.settingsDataStore.data
+            .map { preferences -> decodeHotListCache(preferences[Keys.CATEGORIES_CACHE_JSON]) }
+            .first()
+
+    suspend fun setHotListCache(payload: HotListCachePayload) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[Keys.CATEGORIES_CACHE_JSON] = hotListCacheAdapter.toJson(payload)
+        }
+    }
+
     suspend fun addSearchHistory(query: String) {
         val cleanQuery = query.cleanSearchQuery()
         if (cleanQuery.isBlank()) return
@@ -191,6 +206,11 @@ class SettingsStore @Inject constructor(
             .map { it.cleanSearchQuery() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
+
+    private fun decodeHotListCache(raw: String?): HotListCachePayload? =
+        raw?.takeIf { it.isNotBlank() }?.let { json ->
+            runCatching { hotListCacheAdapter.fromJson(json) }.getOrNull()
+        }
 
     private fun String.cleanSearchQuery(): String =
         trim().replace(Regex("\\s+"), " ").replace(SEARCH_HISTORY_SEPARATOR, " ")

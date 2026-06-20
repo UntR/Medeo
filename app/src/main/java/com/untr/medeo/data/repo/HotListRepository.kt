@@ -5,6 +5,7 @@ import com.untr.medeo.data.api.DoubanHotApi
 import com.untr.medeo.data.api.dto.DoubanHotItemDto
 import com.untr.medeo.data.api.dto.DoubanHotResponse
 import com.untr.medeo.data.api.dto.DoubanHotTagDto
+import com.untr.medeo.data.local.SettingsStore
 import com.untr.medeo.data.model.DEFAULT_HOT_CATEGORY
 import com.untr.medeo.data.model.DEFAULT_HOT_CATEGORY_FILTERS
 import com.untr.medeo.data.model.DEFAULT_HOT_TYPE
@@ -12,6 +13,8 @@ import com.untr.medeo.data.model.DEFAULT_HOT_TYPE_FILTERS
 import com.untr.medeo.data.model.HotFilter
 import com.untr.medeo.data.model.HotListItem
 import com.untr.medeo.data.model.HotListResult
+import com.untr.medeo.data.local.toCachePayload
+import com.untr.medeo.data.local.toHotListResult
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -20,9 +23,28 @@ import kotlinx.coroutines.withContext
 
 @Singleton
 class HotListRepository @Inject constructor(
-    private val api: DoubanHotApi
+    private val api: DoubanHotApi,
+    private val settingsStore: SettingsStore
 ) {
     private val lastSuccessfulResults = ConcurrentHashMap<HotListCacheKey, HotListResult>()
+
+    suspend fun cachedRecentHot(
+        category: String = DEFAULT_HOT_CATEGORY,
+        type: String = DEFAULT_HOT_TYPE,
+        freshOnly: Boolean = true
+    ): HotListResult? = withContext(Dispatchers.IO) {
+        val cacheKey = HotListCacheKey(category, type)
+        lastSuccessfulResults[cacheKey]?.let { return@withContext it }
+
+        val payload = settingsStore.hotListCache()
+            ?.takeIf { it.matches(category, type) }
+            ?.takeIf { !freshOnly || it.isFresh() }
+            ?: return@withContext null
+
+        payload.toHotListResult().also { result ->
+            lastSuccessfulResults[cacheKey] = result
+        }
+    }
 
     suspend fun recentHot(
         category: String = DEFAULT_HOT_CATEGORY,
@@ -39,9 +61,11 @@ class HotListRepository @Inject constructor(
             ).toDomain(category, type)
         }.onSuccess { result ->
             lastSuccessfulResults[cacheKey] = result
+            settingsStore.setHotListCache(result.toCachePayload(category = category, type = type))
         }.getOrElse { error ->
             Log.w("HotListRepository", "Douban hot list failed", error)
-            lastSuccessfulResults[cacheKey] ?: HotListResult(
+            cachedRecentHot(category = category, type = type, freshOnly = false)
+                ?: HotListResult(
                 items = emptyList(),
                 categoryFilters = DEFAULT_HOT_CATEGORY_FILTERS,
                 typeFilters = DEFAULT_HOT_TYPE_FILTERS.map { it.copy(category = category) }

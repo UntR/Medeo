@@ -9,6 +9,8 @@ import com.untr.medeo.data.model.VodItem
 import com.untr.medeo.data.repo.DetailSelectionStore
 import com.untr.medeo.data.repo.FavoriteRepository
 import com.untr.medeo.data.repo.ProgressRepository
+import com.untr.medeo.data.repo.isFinished
+import com.untr.medeo.data.repo.nextEpisodeIndexIfFinished
 import com.untr.medeo.data.repo.toVodItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -18,8 +20,16 @@ import kotlinx.coroutines.launch
 data class FavoritesUiState(
     val loading: Boolean = true,
     val items: List<VodItem> = emptyList(),
-    val recentItems: List<VodItem> = emptyList()
+    val recentItems: List<RecentWatchItem> = emptyList()
 )
+
+data class RecentWatchItem(
+    val item: VodItem,
+    val finished: Boolean,
+    val nextEpisodeIndex: Int?
+) {
+    val actionLabel: String get() = if (finished) "看下一集" else "继续播放"
+}
 
 @HiltViewModel
 class FavoritesViewModel @Inject constructor(
@@ -42,7 +52,13 @@ class FavoritesViewModel @Inject constructor(
                     recentItems = progressByKey.values
                         .sortedByDescending { it.updatedAt }
                         .take(RECENT_WATCH_LIMIT)
-                        .map { it.toVodItem() }
+                        .map { progress ->
+                            RecentWatchItem(
+                                item = progress.toVodItem(),
+                                finished = progress.isFinished(),
+                                nextEpisodeIndex = progress.nextEpisodeIndexIfFinished()
+                            )
+                        }
                 )
             }.collect {}
         }
@@ -52,9 +68,9 @@ class FavoritesViewModel @Inject constructor(
         detailSelectionStore.remember(item)
     }
 
-    fun deleteRecent(item: VodItem) {
+    fun deleteRecent(item: RecentWatchItem) {
         viewModelScope.launch {
-            progressRepository.delete(item.key)
+            progressRepository.delete(item.item.key)
         }
     }
 

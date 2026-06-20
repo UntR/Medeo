@@ -46,6 +46,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.player.PlayerScreen
+import com.untr.medeo.player.RESUME_PLAYBACK_INDEX
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
 import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.MessageState
@@ -176,8 +177,18 @@ private fun MedeoAppRoot(
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
                         },
-                        onContinueRecent = { item ->
-                            navController.navigate(Routes.resumePlayer(item.sourceId, item.vodId))
+                        onContinueRecent = { item, nextEpisodeIndex ->
+                            val route = if (nextEpisodeIndex != null) {
+                                Routes.player(
+                                    sourceId = item.sourceId,
+                                    vodId = item.vodId,
+                                    playSourceIndex = RESUME_PLAYBACK_INDEX,
+                                    episodeIndex = nextEpisodeIndex
+                                )
+                            } else {
+                                Routes.resumePlayer(item.sourceId, item.vodId)
+                            }
+                            navController.navigate(route)
                         }
                     )
                 }

@@ -22,6 +22,8 @@ data class SearchUiState(
     val submittedQuery: String = "",
     val history: List<String> = emptyList(),
     val loading: Boolean = false,
+    val loadingMore: Boolean = false,
+    val hasMore: Boolean = false,
     val completedSources: Int = 0,
     val totalSources: Int = 0,
     val results: List<AggregatedResult> = emptyList(),
@@ -40,6 +42,7 @@ class SearchViewModel @Inject constructor(
         private set
 
     private var searchJob: Job? = null
+    private var loadMoreJob: Job? = null
 
     init {
         val initialQuery = savedStateHandle.get<String>("query").orEmpty()
@@ -60,6 +63,7 @@ class SearchViewModel @Inject constructor(
 
     fun submitSearch(query: String = uiState.query) {
         searchJob?.cancel()
+        loadMoreJob?.cancel()
 
         val trimmed = query.trim()
         if (trimmed.isBlank()) {
@@ -67,6 +71,8 @@ class SearchViewModel @Inject constructor(
                 query = query,
                 submittedQuery = "",
                 loading = false,
+                loadingMore = false,
+                hasMore = false,
                 completedSources = 0,
                 totalSources = 0,
                 results = emptyList(),
@@ -81,6 +87,8 @@ class SearchViewModel @Inject constructor(
                     query = query,
                     submittedQuery = trimmed,
                     loading = false,
+                    loadingMore = false,
+                    hasMore = false,
                     completedSources = 0,
                     totalSources = 0,
                     results = emptyList(),
@@ -94,6 +102,8 @@ class SearchViewModel @Inject constructor(
                 query = query,
                 submittedQuery = trimmed,
                 loading = true,
+                loadingMore = false,
+                hasMore = false,
                 completedSources = 0,
                 totalSources = 0,
                 results = emptyList(),
@@ -104,13 +114,51 @@ class SearchViewModel @Inject constructor(
                     query = query,
                     submittedQuery = trimmed,
                     loading = progress.loading,
+                    loadingMore = progress.loadingMore,
+                    hasMore = progress.hasMore,
                     completedSources = progress.completedSources,
                     totalSources = progress.totalSources,
                     results = progress.results,
                     error = when {
-                        progress.loading -> null
+                        progress.loading || progress.loadingMore -> null
                         progress.totalSources == 0 -> "没有启用数据源"
                         progress.failedSources == progress.totalSources -> "所有数据源请求失败，请检查网络或稍后重试"
+                        progress.results.isEmpty() -> "没有找到结果"
+                        else -> null
+                    }
+                )
+            }
+        }
+    }
+
+    fun loadMore() {
+        val trimmed = uiState.submittedQuery.trim()
+        if (
+            trimmed.isBlank() ||
+            uiState.loading ||
+            uiState.loadingMore ||
+            !uiState.hasMore
+        ) {
+            return
+        }
+
+        loadMoreJob?.cancel()
+        loadMoreJob = viewModelScope.launch {
+            if (!networkMonitor.snapshot().online) {
+                uiState = uiState.copy(loadingMore = false)
+                return@launch
+            }
+
+            searchRepository.searchProgress(trimmed, loadMore = true).collect { progress ->
+                uiState = uiState.copy(
+                    loading = false,
+                    loadingMore = progress.loadingMore,
+                    hasMore = progress.hasMore,
+                    completedSources = progress.completedSources,
+                    totalSources = progress.totalSources,
+                    results = progress.results,
+                    error = when {
+                        progress.loadingMore -> null
                         progress.results.isEmpty() -> "没有找到结果"
                         else -> null
                     }

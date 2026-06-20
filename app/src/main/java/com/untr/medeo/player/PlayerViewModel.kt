@@ -68,10 +68,22 @@ internal fun resolvePlaybackSelection(
             .indexOfFirst { source -> source.name == progress.playSourceName }
             .takeIf { it >= 0 }
             ?: 0
-        val progressSource = playSources[progressPlaySourceIndex]
+        val safePlaySourceIndex = if (requestedPlaySourceIndex == RESUME_PLAYBACK_INDEX) {
+            progressPlaySourceIndex
+        } else {
+            requestedPlaySourceIndex
+                .coerceAtLeast(0)
+                .coerceAtMost(playSources.lastIndex)
+        }
+        val progressSource = playSources[safePlaySourceIndex]
+        val targetEpisodeIndex = if (requestedEpisodeIndex == RESUME_PLAYBACK_INDEX) {
+            progress.episodeIndex
+        } else {
+            requestedEpisodeIndex
+        }
         return PlaybackSelection(
-            playSourceIndex = progressPlaySourceIndex,
-            episodeIndex = progress.episodeIndex.coerceIn(0, progressSource.episodes.lastIndex)
+            playSourceIndex = safePlaySourceIndex,
+            episodeIndex = targetEpisodeIndex.coerceIn(0, progressSource.episodes.lastIndex)
         )
     }
 
@@ -263,11 +275,12 @@ class PlayerViewModel @Inject constructor(
                         )
                     )
                 }
-            val details = detailRepository.details(candidates)
-            detailIndex = details.indexOfFirst { detail ->
-                detail.item.sourceId == sourceId && detail.item.vodId == vodId
-            }.takeIf { it >= 0 } ?: 0
-            val selectedDetail = details.getOrNull(detailIndex)
+                .distinctBy { it.key }
+            val selectedItem = candidates.firstOrNull { item ->
+                item.sourceId == sourceId && item.vodId == vodId
+            } ?: candidates.first()
+            val selectedDetail = detailRepository.detail(selectedItem)
+                ?.takeIf { detail -> detail.playSources.isNotEmpty() }
             val progress = if (
                 requestedPlaySourceIndex == RESUME_PLAYBACK_INDEX ||
                 requestedEpisodeIndex == RESUME_PLAYBACK_INDEX
@@ -276,8 +289,34 @@ class PlayerViewModel @Inject constructor(
             } else {
                 null
             }
+            if (selectedDetail != null) {
+                detailIndex = 0
+                val selection = resolvePlaybackSelection(
+                    detail = selectedDetail,
+                    requestedPlaySourceIndex = requestedPlaySourceIndex,
+                    requestedEpisodeIndex = requestedEpisodeIndex,
+                    progress = progress
+                )
+                playSourceIndex = selection.playSourceIndex
+                episodeIndex = selection.episodeIndex
+                uiState = PlayerUiState(
+                    loading = false,
+                    details = listOf(selectedDetail),
+                    error = null,
+                    wifiOnlyPlay = settings.wifiOnlyPlay,
+                    networkSnapshot = network
+                )
+                loadRemainingDetails(selectedKey = selectedItem.key, candidates = candidates)
+                return@launch
+            }
+
+            val details = detailRepository.details(candidates.filterNot { it.key == selectedItem.key })
+            detailIndex = details.indexOfFirst { detail ->
+                detail.item.sourceId == sourceId && detail.item.vodId == vodId
+            }.takeIf { it >= 0 } ?: 0
+            val fallbackDetail = details.getOrNull(detailIndex)
             val selection = resolvePlaybackSelection(
-                detail = selectedDetail,
+                detail = fallbackDetail,
                 requestedPlaySourceIndex = requestedPlaySourceIndex,
                 requestedEpisodeIndex = requestedEpisodeIndex,
                 progress = progress
@@ -294,6 +333,30 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    private fun loadRemainingDetails(
+        selectedKey: String,
+        candidates: List<VodItem>
+    ) {
+        val remaining = candidates.filterNot { it.key == selectedKey }
+        if (remaining.isEmpty()) return
+
+        viewModelScope.launch {
+            val incoming = detailRepository.details(remaining)
+            if (incoming.isEmpty()) return@launch
+
+            val currentKey = currentDetail()?.item?.key
+            val merged = mergePlaybackDetails(
+                current = uiState.details,
+                incoming = incoming
+            )
+            if (merged.isEmpty()) return@launch
+            uiState = uiState.copy(details = merged)
+            detailIndex = merged.indexOfFirst { detail -> detail.item.key == currentKey }
+                .takeIf { it >= 0 }
+                ?: detailIndex.coerceAtMost(merged.lastIndex)
+        }
+    }
+
     private fun observeProgress() {
         viewModelScope.launch {
             progressRepository.observeAllByKey().collect { progressByKey ->
@@ -304,3 +367,11 @@ class PlayerViewModel @Inject constructor(
 
     private fun currentDetail(): VodDetail? = uiState.detail(detailIndex)
 }
+
+internal fun mergePlaybackDetails(
+    current: List<VodDetail>,
+    incoming: List<VodDetail>
+): List<VodDetail> =
+    (current + incoming)
+        .filter { detail -> detail.playSources.isNotEmpty() }
+        .distinctBy { detail -> detail.item.key }

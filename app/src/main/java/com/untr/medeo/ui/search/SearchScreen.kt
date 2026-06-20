@@ -72,6 +72,7 @@ fun SearchScreen(
             onOpenDetail = openDetail,
             onQueryChange = viewModel::onQueryChange,
             onSubmitSearch = { viewModel.submitSearch() },
+            onLoadMore = viewModel::loadMore,
             onRetry = viewModel::retry,
             onHistoryClick = viewModel::useHistory,
             onClearHistory = viewModel::clearHistory,
@@ -86,6 +87,7 @@ fun SearchScreen(
             onOpenDetail = openDetail,
             onQueryChange = viewModel::onQueryChange,
             onSubmitSearch = { viewModel.submitSearch() },
+            onLoadMore = viewModel::loadMore,
             onRetry = viewModel::retry,
             onHistoryClick = viewModel::useHistory,
             onClearHistory = viewModel::clearHistory,
@@ -103,6 +105,7 @@ private fun PhoneSearchContent(
     onOpenDetail: (VodItem) -> Unit,
     onQueryChange: (String) -> Unit,
     onSubmitSearch: () -> Unit,
+    onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     onHistoryClick: (String) -> Unit,
     onClearHistory: () -> Unit,
@@ -130,6 +133,7 @@ private fun PhoneSearchContent(
                     state = state,
                     results = results,
                     onOpenDetail = onOpenDetail,
+                    onLoadMore = onLoadMore,
                     onRetry = onRetry,
                     onHistoryClick = onHistoryClick,
                     onClearHistory = onClearHistory,
@@ -148,6 +152,7 @@ private fun TabletSearchContent(
     onOpenDetail: (VodItem) -> Unit,
     onQueryChange: (String) -> Unit,
     onSubmitSearch: () -> Unit,
+    onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     onHistoryClick: (String) -> Unit,
     onClearHistory: () -> Unit,
@@ -185,6 +190,7 @@ private fun TabletSearchContent(
                         state = state,
                         results = results,
                         onOpenDetail = onOpenDetail,
+                        onLoadMore = onLoadMore,
                         onRetry = onRetry,
                         onHistoryClick = onHistoryClick,
                         onClearHistory = onClearHistory,
@@ -266,12 +272,16 @@ private fun SearchField(
 
 @Composable
 private fun SearchProgress(state: SearchUiState) {
-    if (state.loading) {
+    if (state.loading || state.loadingMore) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
     if (state.totalSources > 0) {
         Text(
-            text = "${state.completedSources}/${state.totalSources} 源已返回",
+            text = if (state.loadingMore) {
+                "加载更多：${state.completedSources}/${state.totalSources} 源已返回"
+            } else {
+                "${state.completedSources}/${state.totalSources} 源已返回"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
@@ -284,6 +294,7 @@ private fun SearchBody(
     state: SearchUiState,
     results: List<AggregatedResult>,
     onOpenDetail: (VodItem) -> Unit,
+    onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     onHistoryClick: (String) -> Unit,
     onClearHistory: () -> Unit,
@@ -298,7 +309,10 @@ private fun SearchBody(
         )
         results.isNotEmpty() -> SearchResultList(
             results = results,
+            hasMore = state.hasMore,
+            loadingMore = state.loadingMore,
             onOpenDetail = onOpenDetail,
+            onLoadMore = onLoadMore,
             modifier = modifier
         )
         state.submittedQuery.isBlank() && state.history.isNotEmpty() -> SearchHistoryList(
@@ -432,7 +446,10 @@ private fun SearchHistoryList(
 @Composable
 private fun SearchResultList(
     results: List<AggregatedResult>,
+    hasMore: Boolean,
+    loadingMore: Boolean,
     onOpenDetail: (VodItem) -> Unit,
+    onLoadMore: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -445,6 +462,17 @@ private fun SearchResultList(
                 result = result,
                 onClick = onOpenDetail
             )
+        }
+        if (hasMore) {
+            item {
+                Button(
+                    onClick = onLoadMore,
+                    enabled = !loadingMore,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (loadingMore) "加载中..." else "加载更多")
+                }
+            }
         }
     }
 }

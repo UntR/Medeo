@@ -52,6 +52,11 @@ fun WatchProgress.toVodItem(): VodItem {
     val parts = key.split("|", limit = 2)
     val sourceId = parts.getOrNull(0).orEmpty()
     val vodId = parts.getOrNull(1)?.toLongOrNull() ?: 0L
+    val progressText = if (isFinished()) {
+        "看完"
+    } else {
+        positionMs.formatPlaybackPosition()
+    }
     return VodItem(
         sourceId = sourceId,
         sourceName = sourceName,
@@ -61,9 +66,15 @@ fun WatchProgress.toVodItem(): VodItem {
         year = null,
         area = null,
         typeName = null,
-        remarks = "${episodeName} · ${positionMs.formatPlaybackPosition()}"
+        remarks = "$episodeName · $progressText"
     )
 }
+
+fun WatchProgress.isFinished(threshold: Double = WATCH_COMPLETION_THRESHOLD): Boolean =
+    durationMs > 0L && positionMs.toDouble() / durationMs.toDouble() >= threshold
+
+fun WatchProgress.nextEpisodeIndexIfFinished(): Int? =
+    if (isFinished()) episodeIndex + 1 else null
 
 private fun Long.formatPlaybackPosition(): String {
     val totalSeconds = (this / 1000).coerceAtLeast(0)
@@ -76,3 +87,5 @@ private fun Long.formatPlaybackPosition(): String {
         "%02d:%02d".format(minutes, seconds)
     }
 }
+
+const val WATCH_COMPLETION_THRESHOLD = 0.9

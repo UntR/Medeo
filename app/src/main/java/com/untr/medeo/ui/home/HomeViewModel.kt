@@ -61,21 +61,6 @@ class HomeViewModel @Inject constructor(
     ) {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
-            val network = networkMonitor.snapshot()
-            if (!network.online) {
-                uiState = uiState.copy(
-                    loading = false,
-                    items = emptyList(),
-                    selectedCategory = category,
-                    selectedType = type,
-                    resolvingItemId = null,
-                    lookupMessage = null,
-                    manualSearchQuery = null,
-                    error = "当前无网络连接，无法加载热榜"
-                )
-                return@launch
-            }
-
             uiState = uiState.copy(
                 loading = true,
                 selectedCategory = category,
@@ -84,14 +69,51 @@ class HomeViewModel @Inject constructor(
                 manualSearchQuery = null,
                 error = null
             )
+
+            val cached = hotListRepository.cachedRecentHot(category = category, type = type)
+            if (cached != null) {
+                uiState = uiState.withHotListResult(
+                    result = cached,
+                    category = category,
+                    type = type,
+                    error = null
+                )
+            }
+
+            val network = networkMonitor.snapshot()
+            if (!network.online) {
+                val fallback = cached ?: hotListRepository.cachedRecentHot(
+                    category = category,
+                    type = type,
+                    freshOnly = false
+                )
+                uiState = if (fallback != null) {
+                    uiState.withHotListResult(
+                        result = fallback,
+                        category = category,
+                        type = type,
+                        error = null
+                    )
+                } else {
+                    uiState.copy(
+                        loading = false,
+                        items = emptyList(),
+                        selectedCategory = category,
+                        selectedType = type,
+                        resolvingItemId = null,
+                        lookupMessage = null,
+                        manualSearchQuery = null,
+                        error = "当前无网络连接，无法加载热榜"
+                    )
+                }
+                return@launch
+            }
+
             val result = hotListRepository.recentHot(category = category, type = type)
-            uiState = HomeUiState(
-                loading = false,
-                items = result.items,
-                categoryFilters = result.categoryFilters.ifEmpty { uiState.categoryFilters },
-                typeFilters = result.typeFilters.ifEmpty { uiState.typeFilters },
-                selectedCategory = category,
-                selectedType = type,
+            uiState = uiState.withHotListResult(
+                result = result,
+                category = category,
+                type = type,
                 error = if (result.items.isEmpty()) "暂时没有加载到热榜内容" else null
             )
         }
@@ -150,3 +172,19 @@ class HomeViewModel @Inject constructor(
         }
     }
 }
+
+private fun HomeUiState.withHotListResult(
+    result: com.untr.medeo.data.model.HotListResult,
+    category: String,
+    type: String,
+    error: String?
+): HomeUiState =
+    HomeUiState(
+        loading = false,
+        items = result.items,
+        categoryFilters = result.categoryFilters.ifEmpty { categoryFilters },
+        typeFilters = result.typeFilters.ifEmpty { typeFilters },
+        selectedCategory = category,
+        selectedType = type,
+        error = error
+    )

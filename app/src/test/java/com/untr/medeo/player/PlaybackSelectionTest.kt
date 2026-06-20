@@ -49,6 +49,26 @@ class PlaybackSelectionTest {
         assertEquals(PlaybackSelection(playSourceIndex = 0, episodeIndex = 1), selection)
     }
 
+    @Test
+    fun resolvePlaybackSelection_usesProgressLineWithExplicitNextEpisode() {
+        val detail = detail(
+            playSources = listOf(
+                playSource("线路A", 2),
+                playSource("线路B", 3)
+            )
+        )
+        val progress = progress(playSourceName = "线路B", episodeIndex = 1)
+
+        val selection = resolvePlaybackSelection(
+            detail = detail,
+            requestedPlaySourceIndex = RESUME_PLAYBACK_INDEX,
+            requestedEpisodeIndex = 2,
+            progress = progress
+        )
+
+        assertEquals(PlaybackSelection(playSourceIndex = 1, episodeIndex = 2), selection)
+    }
+
     private fun detail(playSources: List<PlaySource>): VodDetail =
         VodDetail(
             item = VodItem(

@@ -25,6 +25,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -42,7 +43,7 @@ import com.untr.medeo.ui.components.VodListRow
 @Composable
 fun FavoritesScreen(
     onOpenDetail: (VodItem) -> Unit,
-    onContinueRecent: (VodItem) -> Unit,
+    onContinueRecent: (VodItem, Int?) -> Unit,
     modifier: Modifier = Modifier,
     windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
     viewModel: FavoritesViewModel = hiltViewModel()
@@ -59,9 +60,9 @@ fun FavoritesScreen(
                 viewModel.rememberForDetail(item)
                 onOpenDetail(item)
             },
-            onContinueRecent = { item ->
-                viewModel.rememberForDetail(item)
-                onContinueRecent(item)
+            onContinueRecent = { recent ->
+                viewModel.rememberForDetail(recent.item)
+                onContinueRecent(recent.item, recent.nextEpisodeIndex)
             },
             onDeleteRecent = viewModel::deleteRecent,
             windowClass = windowClass,
@@ -74,8 +75,8 @@ fun FavoritesScreen(
 private fun FavoritesContent(
     state: FavoritesUiState,
     onOpenDetail: (VodItem) -> Unit,
-    onContinueRecent: (VodItem) -> Unit,
-    onDeleteRecent: (VodItem) -> Unit,
+    onContinueRecent: (RecentWatchItem) -> Unit,
+    onDeleteRecent: (RecentWatchItem) -> Unit,
     windowClass: MedeoWindowClass,
     modifier: Modifier = Modifier
 ) {
@@ -104,8 +105,8 @@ private fun FavoritesContent(
 private fun PhoneFavoritesContent(
     state: FavoritesUiState,
     onOpenDetail: (VodItem) -> Unit,
-    onContinueRecent: (VodItem) -> Unit,
-    onDeleteRecent: (VodItem) -> Unit,
+    onContinueRecent: (RecentWatchItem) -> Unit,
+    onDeleteRecent: (RecentWatchItem) -> Unit,
     windowClass: MedeoWindowClass,
     modifier: Modifier = Modifier
 ) {
@@ -128,7 +129,7 @@ private fun PhoneFavoritesContent(
                         item {
                             SectionHeader("最近观看")
                         }
-                        items(state.recentItems, key = { "recent-${it.key}" }) { item ->
+                        items(state.recentItems, key = { "recent-${it.item.key}" }) { item ->
                             RecentWatchRow(
                                 item = item,
                                 onClick = onOpenDetail,
@@ -158,8 +159,8 @@ private fun PhoneFavoritesContent(
 private fun TabletFavoritesContent(
     state: FavoritesUiState,
     onOpenDetail: (VodItem) -> Unit,
-    onContinueRecent: (VodItem) -> Unit,
-    onDeleteRecent: (VodItem) -> Unit,
+    onContinueRecent: (RecentWatchItem) -> Unit,
+    onDeleteRecent: (RecentWatchItem) -> Unit,
     windowClass: MedeoWindowClass,
     modifier: Modifier = Modifier
 ) {
@@ -219,10 +220,10 @@ private fun FavoritesTitle() {
 
 @Composable
 private fun RecentPanel(
-    items: List<VodItem>,
+    items: List<RecentWatchItem>,
     onOpenDetail: (VodItem) -> Unit,
-    onContinueRecent: (VodItem) -> Unit,
-    onDeleteRecent: (VodItem) -> Unit,
+    onContinueRecent: (RecentWatchItem) -> Unit,
+    onDeleteRecent: (RecentWatchItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -239,7 +240,7 @@ private fun RecentPanel(
             item {
                 SectionHeader("最近观看")
             }
-            items(items, key = { "recent-panel-${it.key}" }) { item ->
+            items(items, key = { "recent-panel-${it.item.key}" }) { item ->
                 RecentWatchRow(
                     item = item,
                     onClick = onOpenDetail,
@@ -284,10 +285,10 @@ private fun FavoritePanel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecentWatchRow(
-    item: VodItem,
+    item: RecentWatchItem,
     onClick: (VodItem) -> Unit,
-    onContinue: (VodItem) -> Unit,
-    onDelete: (VodItem) -> Unit
+    onContinue: (RecentWatchItem) -> Unit,
+    onDelete: (RecentWatchItem) -> Unit
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -334,16 +335,33 @@ private fun RecentWatchRow(
     ) {
         Column {
             VodListRow(
-                item = item,
+                item = item.item,
                 onClick = onClick,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (item.finished) 0.62f else 1f)
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                if (item.finished) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = "看完",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
                 TextButton(onClick = { onContinue(item) }) {
-                    Text("继续播放")
+                    Text(item.actionLabel)
                 }
             }
         }
