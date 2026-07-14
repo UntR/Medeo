@@ -27,6 +27,7 @@ data class SearchUiState(
     val completedSources: Int = 0,
     val totalSources: Int = 0,
     val results: List<AggregatedResult> = emptyList(),
+    val requiresSourceSetup: Boolean = false,
     val error: String? = null
 )
 
@@ -76,6 +77,7 @@ class SearchViewModel @Inject constructor(
                 completedSources = 0,
                 totalSources = 0,
                 results = emptyList(),
+                requiresSourceSetup = false,
                 error = null
             )
             return
@@ -92,6 +94,7 @@ class SearchViewModel @Inject constructor(
                     completedSources = 0,
                     totalSources = 0,
                     results = emptyList(),
+                    requiresSourceSetup = false,
                     error = "当前无网络连接，无法搜索"
                 )
                 return@launch
@@ -107,6 +110,7 @@ class SearchViewModel @Inject constructor(
                 completedSources = 0,
                 totalSources = 0,
                 results = emptyList(),
+                requiresSourceSetup = false,
                 error = null
             )
             searchRepository.searchProgress(trimmed).collect { progress ->
@@ -119,9 +123,10 @@ class SearchViewModel @Inject constructor(
                     completedSources = progress.completedSources,
                     totalSources = progress.totalSources,
                     results = progress.results,
+                    requiresSourceSetup = !progress.loading && progress.totalSources == 0,
                     error = when {
                         progress.loading || progress.loadingMore -> null
-                        progress.totalSources == 0 -> "没有启用数据源"
+                        progress.totalSources == 0 -> "尚未启用数据源"
                         progress.failedSources == progress.totalSources -> "所有数据源请求失败，请检查网络或稍后重试"
                         progress.results.isEmpty() -> "没有找到结果"
                         else -> null

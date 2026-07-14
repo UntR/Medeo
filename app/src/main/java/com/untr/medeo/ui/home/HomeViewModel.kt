@@ -5,14 +5,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.untr.medeo.data.model.DEFAULT_HOT_CATEGORY
-import com.untr.medeo.data.model.DEFAULT_HOT_CATEGORY_FILTERS
-import com.untr.medeo.data.model.DEFAULT_HOT_TYPE
-import com.untr.medeo.data.model.DEFAULT_HOT_TYPE_FILTERS
+import com.untr.medeo.data.api.SourceCatalog
 import com.untr.medeo.data.model.HotFilter
+import com.untr.medeo.data.model.HotContentType
 import com.untr.medeo.data.model.HotListItem
 import com.untr.medeo.data.model.VodItem
 import com.untr.medeo.data.model.bestHotListMatchFor
+import com.untr.medeo.data.model.defaultCategoryFilters
+import com.untr.medeo.data.model.defaultTypeFilters
+import com.untr.medeo.data.local.SettingsStore
 import com.untr.medeo.data.net.NetworkMonitor
 import com.untr.medeo.data.repo.DetailSelectionStore
 import com.untr.medeo.data.repo.HotListRepository
@@ -26,14 +27,16 @@ import kotlinx.coroutines.launch
 
 data class HomeUiState(
     val loading: Boolean = true,
+    val contentType: HotContentType = HotContentType.MOVIE,
     val items: List<HotListItem> = emptyList(),
-    val categoryFilters: List<HotFilter> = DEFAULT_HOT_CATEGORY_FILTERS,
-    val typeFilters: List<HotFilter> = DEFAULT_HOT_TYPE_FILTERS,
-    val selectedCategory: String = DEFAULT_HOT_CATEGORY,
-    val selectedType: String = DEFAULT_HOT_TYPE,
+    val categoryFilters: List<HotFilter> = HotContentType.MOVIE.defaultCategoryFilters(),
+    val typeFilters: List<HotFilter> = HotContentType.MOVIE.defaultTypeFilters(),
+    val selectedCategory: String = HotContentType.MOVIE.defaultCategory,
+    val selectedType: String = HotContentType.MOVIE.defaultType,
     val resolvingItemId: String? = null,
     val lookupMessage: String? = null,
     val manualSearchQuery: String? = null,
+    val requiresSourceSetup: Boolean = false,
     val error: String? = null
 )
 
@@ -42,6 +45,8 @@ class HomeViewModel @Inject constructor(
     private val hotListRepository: HotListRepository,
     private val searchRepository: SearchRepository,
     private val detailSelectionStore: DetailSelectionStore,
+    private val sourceCatalog: SourceCatalog,
+    private val settingsStore: SettingsStore,
     private val networkMonitor: NetworkMonitor
 ) : ViewModel() {
     var uiState by mutableStateOf(HomeUiState())
@@ -52,30 +57,65 @@ class HomeViewModel @Inject constructor(
     private var refreshJob: Job? = null
 
     init {
-        refresh()
+        viewModelScope.launch {
+            loadHotList(
+                contentType = settingsStore.homeContentType(),
+                restoreCachedSelection = true
+            )
+        }
     }
 
-    fun refresh(
-        category: String = uiState.selectedCategory,
-        type: String = uiState.selectedType
+    fun refresh() {
+        loadHotList(
+            contentType = uiState.contentType,
+            category = uiState.selectedCategory,
+            type = uiState.selectedType
+        )
+    }
+
+    private fun loadHotList(
+        contentType: HotContentType,
+        category: String? = null,
+        type: String? = null,
+        restoreCachedSelection: Boolean = false,
+        persistContentType: Boolean = false
     ) {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
-            uiState = uiState.copy(
+            if (persistContentType) {
+                settingsStore.setHomeContentType(contentType)
+            }
+            val storedSelection = if (restoreCachedSelection) {
+                hotListRepository.cachedSelection(contentType, freshOnly = false)
+            } else {
+                null
+            }
+            val selectedCategory = category
+                ?: storedSelection?.category
+                ?: contentType.defaultCategory
+            val selectedType = type
+                ?: storedSelection?.type
+                ?: contentType.defaultType
+            uiState = HomeUiState(
                 loading = true,
-                selectedCategory = category,
-                selectedType = type,
-                lookupMessage = null,
-                manualSearchQuery = null,
-                error = null
+                contentType = contentType,
+                categoryFilters = contentType.defaultCategoryFilters(),
+                typeFilters = contentType.defaultTypeFilters(selectedCategory),
+                selectedCategory = selectedCategory,
+                selectedType = selectedType
             )
 
-            val cached = hotListRepository.cachedRecentHot(category = category, type = type)
+            val cached = hotListRepository.cachedRecentHot(
+                contentType = contentType,
+                category = selectedCategory,
+                type = selectedType
+            )
             if (cached != null) {
                 uiState = uiState.withHotListResult(
                     result = cached,
-                    category = category,
-                    type = type,
+                    contentType = contentType,
+                    category = selectedCategory,
+                    type = selectedType,
                     error = null
                 )
             }
@@ -83,51 +123,81 @@ class HomeViewModel @Inject constructor(
             val network = networkMonitor.snapshot()
             if (!network.online) {
                 val fallback = cached ?: hotListRepository.cachedRecentHot(
-                    category = category,
-                    type = type,
+                    contentType = contentType,
+                    category = selectedCategory,
+                    type = selectedType,
                     freshOnly = false
                 )
                 uiState = if (fallback != null) {
                     uiState.withHotListResult(
                         result = fallback,
-                        category = category,
-                        type = type,
+                        contentType = contentType,
+                        category = selectedCategory,
+                        type = selectedType,
                         error = null
                     )
                 } else {
                     uiState.copy(
                         loading = false,
                         items = emptyList(),
-                        selectedCategory = category,
-                        selectedType = type,
+                        selectedCategory = selectedCategory,
+                        selectedType = selectedType,
                         resolvingItemId = null,
                         lookupMessage = null,
                         manualSearchQuery = null,
+                        requiresSourceSetup = false,
                         error = "当前无网络连接，无法加载热榜"
                     )
                 }
                 return@launch
             }
 
-            val result = hotListRepository.recentHot(category = category, type = type)
+            val result = hotListRepository.recentHot(
+                contentType = contentType,
+                category = selectedCategory,
+                type = selectedType
+            )
             uiState = uiState.withHotListResult(
                 result = result,
-                category = category,
-                type = type,
+                contentType = contentType,
+                category = selectedCategory,
+                type = selectedType,
                 error = if (result.items.isEmpty()) "暂时没有加载到热榜内容" else null
+            )
+        }
+    }
+
+    fun selectContentType(contentType: HotContentType) {
+        if (contentType != uiState.contentType) {
+            loadHotList(
+                contentType = contentType,
+                restoreCachedSelection = true,
+                persistContentType = true
             )
         }
     }
 
     fun selectCategory(category: String) {
         if (category != uiState.selectedCategory) {
-            refresh(category = category, type = DEFAULT_HOT_TYPE)
+            val defaultType = uiState.categoryFilters
+                .firstOrNull { it.category == category }
+                ?.type
+                ?: uiState.contentType.defaultType
+            loadHotList(
+                contentType = uiState.contentType,
+                category = category,
+                type = defaultType
+            )
         }
     }
 
     fun selectType(type: String) {
         if (type != uiState.selectedType) {
-            refresh(category = uiState.selectedCategory, type = type)
+            loadHotList(
+                contentType = uiState.contentType,
+                category = uiState.selectedCategory,
+                type = type
+            )
         }
     }
 
@@ -135,11 +205,21 @@ class HomeViewModel @Inject constructor(
         if (uiState.resolvingItemId != null) return
 
         viewModelScope.launch {
+            if (sourceCatalog.enabledSources().isEmpty()) {
+                uiState = uiState.copy(
+                    resolvingItemId = null,
+                    lookupMessage = "尚未启用数据源",
+                    manualSearchQuery = null,
+                    requiresSourceSetup = true
+                )
+                return@launch
+            }
             if (!networkMonitor.snapshot().online) {
                 uiState = uiState.copy(
                     resolvingItemId = null,
                     lookupMessage = "当前无网络连接，无法匹配可播放源",
-                    manualSearchQuery = null
+                    manualSearchQuery = null,
+                    requiresSourceSetup = false
                 )
                 return@launch
             }
@@ -147,7 +227,8 @@ class HomeViewModel @Inject constructor(
             uiState = uiState.copy(
                 resolvingItemId = item.id,
                 lookupMessage = "正在匹配《${item.title}》的可播放源",
-                manualSearchQuery = null
+                manualSearchQuery = null,
+                requiresSourceSetup = false
             )
 
             val matched = searchRepository.search(item.title)
@@ -157,7 +238,8 @@ class HomeViewModel @Inject constructor(
                 uiState = uiState.copy(
                     resolvingItemId = null,
                     lookupMessage = "可播放源暂时没有可靠匹配到《${item.title}》",
-                    manualSearchQuery = item.title
+                    manualSearchQuery = item.title,
+                    requiresSourceSetup = false
                 )
                 return@launch
             }
@@ -166,7 +248,8 @@ class HomeViewModel @Inject constructor(
             uiState = uiState.copy(
                 resolvingItemId = null,
                 lookupMessage = null,
-                manualSearchQuery = null
+                manualSearchQuery = null,
+                requiresSourceSetup = false
             )
             _openDetailEvents.emit(matched.primary)
         }
@@ -175,12 +258,14 @@ class HomeViewModel @Inject constructor(
 
 private fun HomeUiState.withHotListResult(
     result: com.untr.medeo.data.model.HotListResult,
+    contentType: HotContentType,
     category: String,
     type: String,
     error: String?
 ): HomeUiState =
     HomeUiState(
         loading = false,
+        contentType = contentType,
         items = result.items,
         categoryFilters = result.categoryFilters.ifEmpty { categoryFilters },
         typeFilters = result.typeFilters.ifEmpty { typeFilters },

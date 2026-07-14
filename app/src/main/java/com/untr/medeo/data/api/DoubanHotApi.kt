@@ -12,4 +12,12 @@ interface DoubanHotApi {
         @Query("category") category: String,
         @Query("type") type: String
     ): DoubanHotResponse
+
+    @GET("rexxar/api/v2/subject/recent_hot/tv")
+    suspend fun recentHotTv(
+        @Query("start") start: Int = 0,
+        @Query("limit") limit: Int = 30,
+        @Query("category") category: String,
+        @Query("type") type: String
+    ): DoubanHotResponse
 }

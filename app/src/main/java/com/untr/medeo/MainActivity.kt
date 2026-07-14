@@ -148,6 +148,7 @@ private fun MedeoAppRoot(
                     HomeScreen(
                         windowClass = windowClass,
                         onOpenSearch = { query -> navController.navigate(Routes.search(query)) },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
                         }
@@ -166,6 +167,7 @@ private fun MedeoAppRoot(
                     SearchScreen(
                         windowClass = windowClass,
                         onBack = { navController.popBackStack() },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
                         }
@@ -174,6 +176,7 @@ private fun MedeoAppRoot(
                 composable(Routes.FAVORITES) {
                     FavoritesScreen(
                         windowClass = windowClass,
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
                         },
@@ -199,6 +202,7 @@ private fun MedeoAppRoot(
                     DetailScreen(
                         windowClass = windowClass,
                         onBack = { navController.popBackStack() },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onPlay = { sourceId, vodId, playSourceIndex, episodeIndex ->
                             navController.navigate(
                                 Routes.player(sourceId, vodId, playSourceIndex, episodeIndex)

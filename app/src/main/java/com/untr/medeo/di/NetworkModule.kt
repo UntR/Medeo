@@ -4,6 +4,8 @@ import android.content.Context
 import com.untr.medeo.BuildConfig
 import com.untr.medeo.data.api.DoubanHotApi
 import com.untr.medeo.data.local.CacheConfigStore
+import com.untr.medeo.data.local.HotListCacheStorage
+import com.untr.medeo.data.local.SettingsStore
 import com.untr.medeo.data.net.NETWORK_CONNECT_TIMEOUT_MS
 import com.untr.medeo.data.net.NETWORK_READ_TIMEOUT_MS
 import com.untr.medeo.data.net.NETWORK_WRITE_TIMEOUT_MS
@@ -41,6 +43,10 @@ annotation class MediaOkHttpClient
 object NetworkModule {
     @Provides
     @Singleton
+    fun provideHotListCacheStorage(settingsStore: SettingsStore): HotListCacheStorage = settingsStore
+
+    @Provides
+    @Singleton
     fun provideMoshi(): Moshi =
         Moshi.Builder()
             .add(KotlinJsonAdapterFactory())
@@ -74,11 +80,6 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val request = chain.request()
                     .newBuilder()
-                    .header(
-                        "User-Agent",
-                        "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
-                            "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/v0.1.5"
-                    )
                     .header("Accept", "*/*")
                     .header("Referer", "https://movie.douban.com/explore")
                     .build()
@@ -113,6 +114,13 @@ object NetworkModule {
             .connectTimeout(NETWORK_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .readTimeout(NETWORK_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .writeTimeout(NETWORK_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .addInterceptor { chain ->
+                val request = chain.request()
+                    .newBuilder()
+                    .header("User-Agent", MEDEO_USER_AGENT)
+                    .build()
+                chain.proceed(request)
+            }
 
     private fun loggingInterceptor(): HttpLoggingInterceptor =
         HttpLoggingInterceptor().apply {
@@ -123,3 +131,7 @@ object NetworkModule {
             }
         }
 }
+
+private val MEDEO_USER_AGENT =
+    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/${BuildConfig.VERSION_NAME}"

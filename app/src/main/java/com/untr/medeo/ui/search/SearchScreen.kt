@@ -53,6 +53,7 @@ import com.untr.medeo.ui.components.rememberMedeoImageRequest
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenDetail: (VodItem) -> Unit,
     modifier: Modifier = Modifier,
     windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
@@ -74,6 +75,7 @@ fun SearchScreen(
             onSubmitSearch = { viewModel.submitSearch() },
             onLoadMore = viewModel::loadMore,
             onRetry = viewModel::retry,
+            onOpenSettings = onOpenSettings,
             onHistoryClick = viewModel::useHistory,
             onClearHistory = viewModel::clearHistory,
             windowClass = windowClass,
@@ -89,6 +91,7 @@ fun SearchScreen(
             onSubmitSearch = { viewModel.submitSearch() },
             onLoadMore = viewModel::loadMore,
             onRetry = viewModel::retry,
+            onOpenSettings = onOpenSettings,
             onHistoryClick = viewModel::useHistory,
             onClearHistory = viewModel::clearHistory,
             windowClass = windowClass,
@@ -107,6 +110,7 @@ private fun PhoneSearchContent(
     onSubmitSearch: () -> Unit,
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
     onHistoryClick: (String) -> Unit,
     onClearHistory: () -> Unit,
     windowClass: MedeoWindowClass,
@@ -135,6 +139,7 @@ private fun PhoneSearchContent(
                     onOpenDetail = onOpenDetail,
                     onLoadMore = onLoadMore,
                     onRetry = onRetry,
+                    onOpenSettings = onOpenSettings,
                     onHistoryClick = onHistoryClick,
                     onClearHistory = onClearHistory,
                     modifier = Modifier.fillMaxSize()
@@ -154,6 +159,7 @@ private fun TabletSearchContent(
     onSubmitSearch: () -> Unit,
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
     onHistoryClick: (String) -> Unit,
     onClearHistory: () -> Unit,
     windowClass: MedeoWindowClass,
@@ -192,6 +198,7 @@ private fun TabletSearchContent(
                         onOpenDetail = onOpenDetail,
                         onLoadMore = onLoadMore,
                         onRetry = onRetry,
+                        onOpenSettings = onOpenSettings,
                         onHistoryClick = onHistoryClick,
                         onClearHistory = onClearHistory,
                         modifier = Modifier.fillMaxSize()
@@ -296,6 +303,7 @@ private fun SearchBody(
     onOpenDetail: (VodItem) -> Unit,
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
     onHistoryClick: (String) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
@@ -304,8 +312,8 @@ private fun SearchBody(
         state.error != null -> MessageState(
             message = state.error,
             modifier = modifier,
-            actionLabel = "重试",
-            onAction = onRetry
+            actionLabel = if (state.requiresSourceSetup) "前往设置" else "重试",
+            onAction = if (state.requiresSourceSetup) onOpenSettings else onRetry
         )
         results.isNotEmpty() -> SearchResultList(
             results = results,

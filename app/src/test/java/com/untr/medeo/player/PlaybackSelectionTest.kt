@@ -69,6 +69,47 @@ class PlaybackSelectionTest {
         assertEquals(PlaybackSelection(playSourceIndex = 1, episodeIndex = 2), selection)
     }
 
+    @Test
+    fun resolveProgressEpisodeIndex_prefersNormalizedEpisodeName() {
+        val episodes = listOf(
+            Episode("预告", "https://example.com/preview.m3u8"),
+            Episode("第3集 正片", "https://example.com/3.m3u8")
+        )
+        val progress = progress(
+            playSourceName = "线路A",
+            episodeIndex = 0,
+            episodeName = "第3集-正片"
+        )
+
+        assertEquals(1, resolveProgressEpisodeIndex(episodes, progress))
+    }
+
+    @Test
+    fun resolveProgressEpisodeIndex_usesEpisodeNumberBeforeStoredIndex() {
+        val episodes = listOf(
+            Episode("EP01", "https://example.com/1.m3u8"),
+            Episode("EP03", "https://example.com/3.m3u8")
+        )
+        val progress = progress(
+            playSourceName = "线路A",
+            episodeIndex = 0,
+            episodeName = "第03集"
+        )
+
+        assertEquals(1, resolveProgressEpisodeIndex(episodes, progress))
+    }
+
+    @Test
+    fun resolveProgressEpisodeIndex_clampsStoredIndexAsLastFallback() {
+        val progress = progress(
+            playSourceName = "线路A",
+            episodeIndex = 9,
+            episodeName = "特别篇"
+        )
+
+        assertEquals(1, resolveProgressEpisodeIndex(playSource("线路A", 2).episodes, progress))
+    }
+
     private fun detail(playSources: List<PlaySource>): VodDetail =
         VodDetail(
             item = VodItem(
@@ -96,15 +137,22 @@ class PlaybackSelectionTest {
             }
         )
 
-    private fun progress(playSourceName: String, episodeIndex: Int): WatchProgress =
+    private fun progress(
+        playSourceName: String,
+        episodeIndex: Int,
+        episodeName: String = "第${episodeIndex + 1}集"
+    ): WatchProgress =
         WatchProgress(
-            key = "dbzy|1",
+            contentKey = "庆余年|2024",
             name = "庆余年",
             pic = null,
-            sourceName = "豆瓣资源",
+            year = "2024",
+            preferredSourceId = "dbzy",
+            preferredVodId = 1,
+            preferredSourceName = "豆瓣资源",
             playSourceName = playSourceName,
             episodeIndex = episodeIndex,
-            episodeName = "第${episodeIndex + 1}集",
+            episodeName = episodeName,
             positionMs = 60_000,
             durationMs = 120_000,
             updatedAt = 1

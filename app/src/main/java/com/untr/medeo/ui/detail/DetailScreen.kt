@@ -57,6 +57,7 @@ import com.untr.medeo.ui.components.rememberMedeoImageRequest
 @Composable
 fun DetailScreen(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit,
     modifier: Modifier = Modifier,
     windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
@@ -69,8 +70,8 @@ fun DetailScreen(
         state.error != null -> MessageState(
             message = state.error,
             modifier = modifier,
-            actionLabel = "重试",
-            onAction = viewModel::load
+            actionLabel = if (state.requiresSourceSetup) "前往设置" else "重试",
+            onAction = if (state.requiresSourceSetup) onOpenSettings else viewModel::load
         )
         state.details.isNotEmpty() -> DetailContent(
             details = state.details,
@@ -108,8 +109,8 @@ private fun DetailContent(
             playSource = playSource,
             selectedDetailIndex = selectedDetailIndex,
             selectedLineIndex = selectedLineIndex,
-            favorite = detail.item.key in favoriteKeys,
-            progress = progressByKey[detail.item.key],
+            favorite = detail.item.contentKey in favoriteKeys || detail.item.key in favoriteKeys,
+            progress = progressByKey[detail.item.contentKey] ?: progressByKey[detail.item.key],
             onSelectDetail = {
                 selectedDetailIndex = it
                 selectedLineIndex = 0
@@ -128,8 +129,8 @@ private fun DetailContent(
             playSource = playSource,
             selectedDetailIndex = selectedDetailIndex,
             selectedLineIndex = selectedLineIndex,
-            favorite = detail.item.key in favoriteKeys,
-            progress = progressByKey[detail.item.key],
+            favorite = detail.item.contentKey in favoriteKeys || detail.item.key in favoriteKeys,
+            progress = progressByKey[detail.item.contentKey] ?: progressByKey[detail.item.key],
             onSelectDetail = {
                 selectedDetailIndex = it
                 selectedLineIndex = 0

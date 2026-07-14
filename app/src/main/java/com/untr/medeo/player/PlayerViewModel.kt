@@ -17,6 +17,7 @@ import com.untr.medeo.data.model.Episode
 import com.untr.medeo.data.model.PlaySource
 import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.model.VodItem
+import com.untr.medeo.data.model.normalize
 import com.untr.medeo.data.net.NetworkMonitor
 import com.untr.medeo.data.net.NetworkSnapshot
 import com.untr.medeo.data.repo.DetailRepository
@@ -78,7 +79,7 @@ internal fun resolvePlaybackSelection(
         }
         val progressSource = playSources[safePlaySourceIndex]
         val targetEpisodeIndex = if (requestedEpisodeIndex == RESUME_PLAYBACK_INDEX) {
-            progress.episodeIndex
+            resolveProgressEpisodeIndex(progressSource.episodes, progress)
         } else {
             requestedEpisodeIndex
         }
@@ -96,6 +97,36 @@ internal fun resolvePlaybackSelection(
         .coerceAtMost(playSources[safePlaySourceIndex].episodes.lastIndex)
 
     return PlaybackSelection(safePlaySourceIndex, safeEpisodeIndex)
+}
+
+internal fun resolveProgressEpisodeIndex(
+    episodes: List<Episode>,
+    progress: WatchProgress
+): Int {
+    if (episodes.isEmpty()) return 0
+    val normalizedProgressName = normalize(progress.episodeName)
+    episodes.indexOfFirst { episode ->
+        normalize(episode.name) == normalizedProgressName
+    }.takeIf { index -> index >= 0 }?.let { index -> return index }
+
+    val progressNumber = episodeNumber(progress.episodeName)
+    if (progressNumber != null) {
+        episodes.indexOfFirst { episode -> episodeNumber(episode.name) == progressNumber }
+            .takeIf { index -> index >= 0 }
+            ?.let { index -> return index }
+    }
+    return progress.episodeIndex.coerceIn(0, episodes.lastIndex)
+}
+
+private fun episodeNumber(name: String): Int? {
+    val patterns = listOf(
+        Regex("第\\s*(\\d+)\\s*[集话期]", RegexOption.IGNORE_CASE),
+        Regex("(?:EP?|集)\\s*0*(\\d+)", RegexOption.IGNORE_CASE),
+        Regex("^\\s*0*(\\d+)\\s*$")
+    )
+    return patterns.firstNotNullOfOrNull { pattern ->
+        pattern.find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
+    }
 }
 
 @UnstableApi
@@ -224,7 +255,9 @@ class PlayerViewModel @Inject constructor(
 
     fun resumePositionForCurrentEpisode(): Long {
         val detail = currentDetail() ?: return 0L
-        val progress = savedProgressByKey[detail.item.key] ?: return 0L
+        val progress = savedProgressByKey[detail.item.contentKey]
+            ?: savedProgressByKey[detail.item.key]
+            ?: return 0L
         val playSource = uiState.playSource(detailIndex, playSourceIndex) ?: return 0L
         return if (
             progress.playSourceName == playSource.name &&
@@ -291,15 +324,15 @@ class PlayerViewModel @Inject constructor(
             } ?: candidates.first()
             val selectedDetail = detailRepository.detail(selectedItem)
                 ?.takeIf { detail -> detail.playSources.isNotEmpty() }
-            val progress = if (
+            val shouldResume =
                 requestedPlaySourceIndex == RESUME_PLAYBACK_INDEX ||
                 requestedEpisodeIndex == RESUME_PLAYBACK_INDEX
-            ) {
-                progressRepository.observeProgress("$sourceId|$vodId").first()
-            } else {
-                null
-            }
             if (selectedDetail != null) {
+                val progress = if (shouldResume) {
+                    progressRepository.observeProgress(selectedDetail.item).first()
+                } else {
+                    null
+                }
                 detailIndex = 0
                 val selection = resolvePlaybackSelection(
                     detail = selectedDetail,
@@ -325,6 +358,11 @@ class PlayerViewModel @Inject constructor(
                 detail.item.sourceId == sourceId && detail.item.vodId == vodId
             }.takeIf { it >= 0 } ?: 0
             val fallbackDetail = details.getOrNull(detailIndex)
+            val progress = if (shouldResume && fallbackDetail != null) {
+                progressRepository.observeProgress(fallbackDetail.item).first()
+            } else {
+                null
+            }
             val selection = resolvePlaybackSelection(
                 detail = fallbackDetail,
                 requestedPlaySourceIndex = requestedPlaySourceIndex,

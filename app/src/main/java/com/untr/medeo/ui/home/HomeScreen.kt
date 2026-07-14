@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.untr.medeo.R
+import com.untr.medeo.data.model.HotContentType
 import com.untr.medeo.data.model.HotFilter
 import com.untr.medeo.data.model.HotListItem
 import com.untr.medeo.data.model.VodItem
@@ -60,6 +61,7 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     onOpenSearch: (String?) -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenDetail: (VodItem) -> Unit,
     modifier: Modifier = Modifier,
     windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
@@ -77,6 +79,8 @@ fun HomeScreen(
         PhoneHomeContent(
             state = state,
             onOpenSearch = onOpenSearch,
+            onOpenSettings = onOpenSettings,
+            onSelectContentType = viewModel::selectContentType,
             onSelectCategory = viewModel::selectCategory,
             onSelectType = viewModel::selectType,
             onRefresh = viewModel::refresh,
@@ -87,6 +91,8 @@ fun HomeScreen(
         TabletHomeContent(
             state = state,
             onOpenSearch = onOpenSearch,
+            onOpenSettings = onOpenSettings,
+            onSelectContentType = viewModel::selectContentType,
             onSelectCategory = viewModel::selectCategory,
             onSelectType = viewModel::selectType,
             onRefresh = viewModel::refresh,
@@ -101,6 +107,8 @@ fun HomeScreen(
 private fun PhoneHomeContent(
     state: HomeUiState,
     onOpenSearch: (String?) -> Unit,
+    onOpenSettings: () -> Unit,
+    onSelectContentType: (HotContentType) -> Unit,
     onSelectCategory: (String) -> Unit,
     onSelectType: (String) -> Unit,
     onRefresh: () -> Unit,
@@ -113,6 +121,11 @@ private fun PhoneHomeContent(
             .background(MaterialTheme.colorScheme.background)
     ) {
         HomeHeader(onOpenSearch = { onOpenSearch(null) })
+
+        HotContentTabs(
+            selectedContentType = state.contentType,
+            onSelected = onSelectContentType
+        )
 
         HotCategoryTabs(
             filters = state.categoryFilters,
@@ -131,6 +144,8 @@ private fun PhoneHomeContent(
                 message = message,
                 manualSearchQuery = state.manualSearchQuery,
                 onOpenSearch = onOpenSearch,
+                showSettingsAction = state.requiresSourceSetup,
+                onOpenSettings = onOpenSettings,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
@@ -156,6 +171,8 @@ private fun PhoneHomeContent(
 private fun TabletHomeContent(
     state: HomeUiState,
     onOpenSearch: (String?) -> Unit,
+    onOpenSettings: () -> Unit,
+    onSelectContentType: (HotContentType) -> Unit,
     onSelectCategory: (String) -> Unit,
     onSelectType: (String) -> Unit,
     onRefresh: () -> Unit,
@@ -176,6 +193,10 @@ private fun TabletHomeContent(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 HomeHeader(onOpenSearch = { onOpenSearch(null) })
+                HotContentTabs(
+                    selectedContentType = state.contentType,
+                    onSelected = onSelectContentType
+                )
                 HotCategoryTabs(
                     filters = state.categoryFilters,
                     selectedCategory = state.selectedCategory,
@@ -192,6 +213,8 @@ private fun TabletHomeContent(
                         message = message,
                         manualSearchQuery = state.manualSearchQuery,
                         onOpenSearch = onOpenSearch,
+                        showSettingsAction = state.requiresSourceSetup,
+                        onOpenSettings = onOpenSettings,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
                     )
                 }
@@ -261,6 +284,8 @@ private fun LookupMessage(
     message: String,
     manualSearchQuery: String?,
     onOpenSearch: (String?) -> Unit,
+    showSettingsAction: Boolean,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -277,6 +302,10 @@ private fun LookupMessage(
         if (!manualSearchQuery.isNullOrBlank()) {
             TextButton(onClick = { onOpenSearch(manualSearchQuery) }) {
                 Text("去搜索")
+            }
+        } else if (showSettingsAction) {
+            TextButton(onClick = onOpenSettings) {
+                Text("前往设置")
             }
         }
     }
@@ -401,6 +430,24 @@ private fun HotCompactRow(
             )
         }
     }
+}
+
+@Composable
+private fun HotContentTabs(
+    selectedContentType: HotContentType,
+    onSelected: (HotContentType) -> Unit
+) {
+    val contentTypes = HotContentType.entries
+    InstantTabRow(
+        items = contentTypes.map { contentType ->
+            InstantTabItem(id = contentType.name, label = contentType.title)
+        },
+        selectedIndex = contentTypes.indexOf(selectedContentType),
+        onSelected = { index ->
+            contentTypes.getOrNull(index)?.let(onSelected)
+        },
+        contentPadding = PaddingValues(horizontal = 16.dp)
+    )
 }
 
 @Composable

@@ -11,6 +11,8 @@ import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.model.VodItem
 import com.untr.medeo.data.local.WatchProgress
 import com.untr.medeo.data.net.NetworkMonitor
+import com.untr.medeo.data.repo.ContentRecoveryRepository
+import com.untr.medeo.data.repo.ContentRecoveryResult
 import com.untr.medeo.data.repo.DetailRepository
 import com.untr.medeo.data.repo.DetailSelectionStore
 import com.untr.medeo.data.repo.FavoriteRepository
@@ -24,6 +26,7 @@ data class DetailUiState(
     val details: List<VodDetail> = emptyList(),
     val favoriteKeys: Set<String> = emptySet(),
     val progressByKey: Map<String, WatchProgress> = emptyMap(),
+    val requiresSourceSetup: Boolean = false,
     val error: String? = null
 )
 
@@ -32,6 +35,7 @@ class DetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val detailRepository: DetailRepository,
     private val detailSelectionStore: DetailSelectionStore,
+    private val contentRecoveryRepository: ContentRecoveryRepository,
     private val favoriteRepository: FavoriteRepository,
     private val progressRepository: ProgressRepository,
     private val sourceCatalog: SourceCatalog,
@@ -51,49 +55,108 @@ class DetailViewModel @Inject constructor(
 
     fun load() {
         viewModelScope.launch {
-            uiState = DetailUiState(loading = true)
+            uiState = uiState.copy(
+                loading = true,
+                details = emptyList(),
+                requiresSourceSetup = false,
+                error = null
+            )
             if (sourceId.isBlank() || vodId <= 0L) {
-                uiState = DetailUiState(loading = false, error = "详情参数无效")
+                uiState = uiState.copy(loading = false, error = "详情参数无效")
                 return@launch
             }
-            val source = sourceCatalog.sourceById(sourceId)
-            if (source == null) {
-                uiState = DetailUiState(loading = false, error = "未知数据源")
+            val enabledSources = sourceCatalog.enabledSources()
+            if (enabledSources.isEmpty()) {
+                uiState = uiState.copy(
+                    loading = false,
+                    requiresSourceSetup = true,
+                    error = "尚未启用数据源"
+                )
                 return@launch
             }
             if (!networkMonitor.snapshot().online) {
-                uiState = DetailUiState(loading = false, error = "当前无网络连接，无法加载详情")
+                uiState = uiState.copy(
+                    loading = false,
+                    error = "当前无网络连接，无法加载详情"
+                )
                 return@launch
             }
 
-            val candidates = detailSelectionStore.candidates(sourceId, vodId)
-                .ifEmpty {
-                    listOf(
-                        VodItem(
-                            sourceId = source.id,
-                            sourceName = source.name,
-                            vodId = vodId,
-                            name = "",
-                            pic = null,
-                            year = null,
-                            area = null,
-                            typeName = null,
-                            remarks = null
-                        )
+            val remembered = detailSelectionStore.candidates(sourceId, vodId)
+            val candidates = if (remembered.isNotEmpty()) {
+                remembered
+            } else {
+                val source = sourceCatalog.sourceById(sourceId)
+                if (source == null) {
+                    uiState = uiState.copy(loading = false, error = "未知数据源")
+                    return@launch
+                }
+                listOf(
+                    VodItem(
+                        sourceId = source.id,
+                        sourceName = source.name,
+                        vodId = vodId,
+                        name = "",
+                        pic = null,
+                        year = null,
+                        area = null,
+                        typeName = null,
+                        remarks = null
+                    )
+                )
+            }
+
+            val enabledIds = enabledSources.mapTo(hashSetOf()) { source -> source.id }
+            val enabledCandidates = candidates.filter { item -> item.sourceId in enabledIds }
+            val result = if (candidates.size == 1) {
+                contentRecoveryRepository.recover(candidates.first())
+            } else {
+                val details = detailRepository.details(enabledCandidates)
+                if (details.isNotEmpty()) {
+                    ContentRecoveryResult.Success(
+                        candidates = details.map { detail -> detail.item },
+                        details = details,
+                        usedFallback = false
+                    )
+                } else {
+                    contentRecoveryRepository.recover(candidates.first())
+                }
+            }
+            when (result) {
+                is ContentRecoveryResult.Success -> {
+                    detailSelectionStore.remember(result.candidates)
+                    uiState = uiState.copy(
+                        loading = false,
+                        details = result.details
                     )
                 }
-            val details = detailRepository.details(candidates)
-            uiState = DetailUiState(
-                loading = false,
-                details = details,
-                error = if (details.isEmpty()) "详情加载失败或暂无可播放线路" else null
-            )
+                ContentRecoveryResult.NoEnabledSources -> {
+                    uiState = uiState.copy(
+                        loading = false,
+                        requiresSourceSetup = true,
+                        error = "尚未启用数据源"
+                    )
+                }
+                ContentRecoveryResult.NetworkUnavailable -> {
+                    uiState = uiState.copy(
+                        loading = false,
+                        error = "当前无网络连接，无法加载详情"
+                    )
+                }
+                ContentRecoveryResult.NotFound -> {
+                    uiState = uiState.copy(
+                        loading = false,
+                        error = "详情加载失败，其他启用源也没有精确匹配到该内容"
+                    )
+                }
+            }
         }
     }
 
     fun toggleFavorite(detail: VodDetail) {
         viewModelScope.launch {
-            val isFavorite = detail.item.key in uiState.favoriteKeys
+            val isFavorite = detail.item.contentKey in uiState.favoriteKeys ||
+                detail.item.key in uiState.favoriteKeys
             favoriteRepository.setFavorite(detail.item, !isFavorite)
         }
     }

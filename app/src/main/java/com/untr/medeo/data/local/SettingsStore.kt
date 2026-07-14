@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.untr.medeo.data.api.DEFAULT_ENABLED_SOURCE_IDS
+import com.untr.medeo.data.model.HotContentType
 import com.squareup.moshi.Moshi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -46,8 +47,10 @@ enum class AppThemeMode {
 class SettingsStore @Inject constructor(
     @ApplicationContext private val context: Context,
     moshi: Moshi
-) {
+) : HotListCacheStorage {
     private val hotListCacheAdapter = moshi.adapter(HotListCachePayload::class.java)
+    private val hotListCachesAdapter = moshi.adapter(HotListCacheCollection::class.java)
+    private val sourceHealthAdapter = moshi.adapter(SourceHealthPayload::class.java)
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data
         .map { preferences ->
@@ -67,6 +70,11 @@ class SettingsStore @Inject constructor(
 
     val searchHistory: Flow<List<String>> = context.settingsDataStore.data
         .map { preferences -> decodeSearchHistory(preferences[Keys.SEARCH_HISTORY].orEmpty()) }
+
+    val sourceHealth: Flow<Map<String, SourceHealthRecord>> = context.settingsDataStore.data
+        .map { preferences ->
+            decodeSourceHealth(preferences[Keys.SOURCE_HEALTH_JSON]).bySourceId()
+        }
 
     suspend fun ensureSourceListVersion() {
         context.settingsDataStore.edit { preferences ->
@@ -93,6 +101,13 @@ class SettingsStore @Inject constructor(
     suspend fun wifiOnlyPlay(): Boolean =
         settings.map { it.wifiOnlyPlay }.first()
 
+    suspend fun homeContentType(): HotContentType =
+        context.settingsDataStore.data
+            .map { preferences ->
+                HotContentType.fromStoredValue(preferences[Keys.HOME_CONTENT_KIND])
+            }
+            .first()
+
     suspend fun setSourceEnabled(sourceId: String, enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             val current = preferences[Keys.ENABLED_SOURCES] ?: DEFAULT_ENABLED_SOURCE_IDS
@@ -115,6 +130,12 @@ class SettingsStore @Inject constructor(
     suspend fun setWifiOnlyPlay(enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             preferences[Keys.WIFI_ONLY_PLAY] = enabled
+        }
+    }
+
+    suspend fun setHomeContentType(contentType: HotContentType) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[Keys.HOME_CONTENT_KIND] = contentType.name
         }
     }
 
@@ -165,14 +186,29 @@ class SettingsStore @Inject constructor(
         }
     }
 
-    suspend fun hotListCache(): HotListCachePayload? =
+    override suspend fun hotListCache(contentType: HotContentType): HotListCachePayload? =
         context.settingsDataStore.data
-            .map { preferences -> decodeHotListCache(preferences[Keys.CATEGORIES_CACHE_JSON]) }
+            .map { preferences ->
+                decodeHotListCaches(preferences[Keys.CATEGORIES_CACHE_JSON]).cacheFor(contentType)
+            }
             .first()
 
-    suspend fun setHotListCache(payload: HotListCachePayload) {
+    override suspend fun setHotListCache(
+        contentType: HotContentType,
+        payload: HotListCachePayload
+    ) {
         context.settingsDataStore.edit { preferences ->
-            preferences[Keys.CATEGORIES_CACHE_JSON] = hotListCacheAdapter.toJson(payload)
+            val caches = decodeHotListCaches(preferences[Keys.CATEGORIES_CACHE_JSON])
+                .withCache(contentType, payload)
+            preferences[Keys.CATEGORIES_CACHE_JSON] = hotListCachesAdapter.toJson(caches)
+        }
+    }
+
+    suspend fun setSourceHealth(record: SourceHealthRecord) {
+        context.settingsDataStore.edit { preferences ->
+            val payload = decodeSourceHealth(preferences[Keys.SOURCE_HEALTH_JSON])
+                .withRecord(record)
+            preferences[Keys.SOURCE_HEALTH_JSON] = sourceHealthAdapter.toJson(payload)
         }
     }
 
@@ -207,10 +243,18 @@ class SettingsStore @Inject constructor(
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
 
-    private fun decodeHotListCache(raw: String?): HotListCachePayload? =
+    private fun decodeHotListCaches(raw: String?): HotListCacheCollection {
+        return decodeHotListCacheCollection(
+            raw = raw,
+            collectionAdapter = hotListCachesAdapter,
+            legacyAdapter = hotListCacheAdapter
+        )
+    }
+
+    private fun decodeSourceHealth(raw: String?): SourceHealthPayload =
         raw?.takeIf { it.isNotBlank() }?.let { json ->
-            runCatching { hotListCacheAdapter.fromJson(json) }.getOrNull()
-        }
+            runCatching { sourceHealthAdapter.fromJson(json) }.getOrNull()
+        } ?: SourceHealthPayload()
 
     private fun String.cleanSearchQuery(): String =
         trim().replace(Regex("\\s+"), " ").replace(SEARCH_HISTORY_SEPARATOR, " ")
@@ -222,6 +266,8 @@ class SettingsStore @Inject constructor(
         val HTTP_CACHE_MB = intPreferencesKey("http_cache_mb")
         val WIFI_ONLY_PLAY = booleanPreferencesKey("wifi_only_play")
         val CATEGORIES_CACHE_JSON = stringPreferencesKey("categories_cache_json")
+        val SOURCE_HEALTH_JSON = stringPreferencesKey("source_health_json")
+        val HOME_CONTENT_KIND = stringPreferencesKey("home_content_kind")
         val SOURCE_LIST_VERSION = intPreferencesKey("source_list_version")
         val SOURCE_MANIFEST_URL = stringPreferencesKey("source_manifest_url")
         val REMOTE_SOURCE_MANIFEST_JSON = stringPreferencesKey("remote_source_manifest_json")

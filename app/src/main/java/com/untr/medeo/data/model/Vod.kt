@@ -18,7 +18,8 @@ data class VodItem(
     val remarks: String?
 ) {
     val key: String get() = "$sourceId|$vodId"
-    val dedupKey: String get() = "${normalize(name)}|${year.orEmpty()}"
+    val contentKey: String get() = contentKey(name, year)
+    val dedupKey: String get() = contentKey
 }
 
 data class VodDetail(
@@ -76,6 +77,9 @@ data class AggregatedResult(
 fun normalize(value: String): String =
     value.replace(Regex("[\\s·・•\\-_:：『』「」【】《》()（）\\[\\]]+"), "")
         .lowercase()
+
+fun contentKey(name: String, year: String?): String =
+    "${normalize(name)}|${year.orEmpty().trim()}"
 
 fun VodItemDto.toDomain(source: VodSource): VodItem =
     VodItem(

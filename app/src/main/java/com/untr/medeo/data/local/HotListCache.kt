@@ -1,7 +1,10 @@
 package com.untr.medeo.data.local
 
 import com.squareup.moshi.JsonClass
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonAdapter
 import com.untr.medeo.data.model.HotFilter
+import com.untr.medeo.data.model.HotContentType
 import com.untr.medeo.data.model.HotListItem
 import com.untr.medeo.data.model.HotListResult
 
@@ -20,6 +23,30 @@ data class HotListCachePayload(
 
     fun isFresh(nowMs: Long = System.currentTimeMillis()): Boolean =
         nowMs - ts <= HOT_LIST_CACHE_TTL_MS
+}
+
+@JsonClass(generateAdapter = true)
+data class HotListCacheCollection(
+    @Json(name = "MOVIE") val movie: HotListCachePayload? = null,
+    @Json(name = "TV") val tv: HotListCachePayload? = null
+) {
+    fun cacheFor(contentType: HotContentType): HotListCachePayload? = when (contentType) {
+        HotContentType.MOVIE -> movie
+        HotContentType.TV -> tv
+    }
+
+    fun withCache(
+        contentType: HotContentType,
+        payload: HotListCachePayload
+    ): HotListCacheCollection = when (contentType) {
+        HotContentType.MOVIE -> copy(movie = payload)
+        HotContentType.TV -> copy(tv = payload)
+    }
+
+    companion object {
+        fun fromLegacyMovie(payload: HotListCachePayload): HotListCacheCollection =
+            HotListCacheCollection(movie = payload)
+    }
 }
 
 @JsonClass(generateAdapter = true)
@@ -108,4 +135,26 @@ private fun HotFilterCacheItem.toHotFilter(): HotFilter =
     )
 
 const val HOT_LIST_CACHE_TTL_MS: Long = 7L * 24L * 60L * 60L * 1000L
-private const val HOT_LIST_CACHE_VERSION = 1
+private const val HOT_LIST_CACHE_VERSION = 2
+
+interface HotListCacheStorage {
+    suspend fun hotListCache(contentType: HotContentType): HotListCachePayload?
+
+    suspend fun setHotListCache(
+        contentType: HotContentType,
+        payload: HotListCachePayload
+    )
+}
+
+internal fun decodeHotListCacheCollection(
+    raw: String?,
+    collectionAdapter: JsonAdapter<HotListCacheCollection>,
+    legacyAdapter: JsonAdapter<HotListCachePayload>
+): HotListCacheCollection {
+    val json = raw?.takeIf { it.isNotBlank() } ?: return HotListCacheCollection()
+    val collection = runCatching { collectionAdapter.fromJson(json) }.getOrNull()
+    if (collection?.movie != null || collection?.tv != null) return collection
+
+    val legacyMovie = runCatching { legacyAdapter.fromJson(json) }.getOrNull()
+    return legacyMovie?.let(HotListCacheCollection::fromLegacyMovie) ?: HotListCacheCollection()
+}

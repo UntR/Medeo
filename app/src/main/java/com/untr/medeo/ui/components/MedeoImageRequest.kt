@@ -6,10 +6,11 @@ import androidx.compose.ui.platform.LocalContext
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
+import com.untr.medeo.BuildConfig
 
-private const val IMAGE_USER_AGENT =
+private val IMAGE_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/v0.1.5"
+        "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/${BuildConfig.VERSION_NAME}"
 
 @Composable
 fun rememberMedeoImageRequest(url: String?): ImageRequest {

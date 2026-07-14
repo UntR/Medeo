@@ -2,6 +2,7 @@ package com.untr.medeo.data.repo
 
 import com.untr.medeo.data.local.ProgressDao
 import com.untr.medeo.data.local.WatchProgress
+import com.untr.medeo.data.local.preferredKey
 import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.model.VodItem
 import javax.inject.Inject
@@ -13,14 +14,31 @@ import kotlinx.coroutines.flow.map
 class ProgressRepository @Inject constructor(
     private val progressDao: ProgressDao
 ) {
+    fun observeAll(): Flow<List<WatchProgress>> = progressDao.observeAll()
+
     fun observeAllByKey(): Flow<Map<String, WatchProgress>> =
-        progressDao.observeAll().map { progresses -> progresses.associateBy { it.key } }
+        progressDao.observeAll().map { progresses ->
+            buildMap {
+                progresses.forEach { progress ->
+                    put(progress.contentKey, progress)
+                    putIfAbsent(progress.preferredKey, progress)
+                }
+            }
+        }
 
-    fun observeProgress(key: String): Flow<WatchProgress?> =
-        progressDao.observeProgress(key)
+    fun observeProgress(item: VodItem): Flow<WatchProgress?> =
+        progressDao.observeProgress(
+            contentKey = item.contentKey,
+            sourceId = item.sourceId,
+            vodId = item.vodId
+        )
 
-    suspend fun delete(key: String) {
-        progressDao.deleteByKey(key)
+    suspend fun delete(contentKey: String) {
+        progressDao.deleteByContentKey(contentKey)
+    }
+
+    suspend fun clearAll() {
+        progressDao.deleteAll()
     }
 
     suspend fun save(
@@ -31,12 +49,15 @@ class ProgressRepository @Inject constructor(
         positionMs: Long,
         durationMs: Long
     ) {
-        progressDao.upsert(
+        progressDao.upsertForContent(
             WatchProgress(
-                key = detail.item.key,
+                contentKey = detail.item.contentKey,
                 name = detail.item.name,
                 pic = detail.item.pic,
-                sourceName = detail.item.sourceName,
+                year = detail.item.year,
+                preferredSourceId = detail.item.sourceId,
+                preferredVodId = detail.item.vodId,
+                preferredSourceName = detail.item.sourceName,
                 playSourceName = playSourceName,
                 episodeIndex = episodeIndex,
                 episodeName = episodeName,
@@ -46,24 +67,43 @@ class ProgressRepository @Inject constructor(
             )
         )
     }
+
+    suspend fun updatePreferred(original: VodItem, recovered: VodItem) {
+        val stored = progressDao.findByIdentity(
+            contentKey = original.contentKey,
+            sourceId = original.sourceId,
+            vodId = original.vodId
+        ) ?: return
+        val existing = progressDao.findByContentKey(recovered.contentKey)
+        val progress = listOfNotNull(stored, existing).maxBy { it.updatedAt }
+        progressDao.replaceIdentity(
+            oldContentKey = stored.contentKey,
+            progress = progress.copy(
+                contentKey = recovered.contentKey,
+                name = recovered.name,
+                pic = recovered.pic ?: progress.pic,
+                year = recovered.year,
+                preferredSourceId = recovered.sourceId,
+                preferredVodId = recovered.vodId,
+                preferredSourceName = recovered.sourceName
+            )
+        )
+    }
 }
 
 fun WatchProgress.toVodItem(): VodItem {
-    val parts = key.split("|", limit = 2)
-    val sourceId = parts.getOrNull(0).orEmpty()
-    val vodId = parts.getOrNull(1)?.toLongOrNull() ?: 0L
     val progressText = if (isFinished()) {
         "看完"
     } else {
         positionMs.formatPlaybackPosition()
     }
     return VodItem(
-        sourceId = sourceId,
-        sourceName = sourceName,
-        vodId = vodId,
+        sourceId = preferredSourceId,
+        sourceName = preferredSourceName,
+        vodId = preferredVodId,
         name = name.ifBlank { "最近观看" },
         pic = pic,
-        year = null,
+        year = year,
         area = null,
         typeName = null,
         remarks = "$episodeName · $progressText"

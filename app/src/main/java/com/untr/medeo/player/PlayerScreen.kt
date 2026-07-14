@@ -34,12 +34,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -74,11 +77,19 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -97,6 +108,7 @@ import com.untr.medeo.ui.components.InstantTabItem
 import com.untr.medeo.ui.components.InstantTabRow
 import com.untr.medeo.ui.components.LoadingState
 import com.untr.medeo.ui.components.MessageState
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
@@ -145,6 +157,7 @@ private fun PlayerContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val activity = context.findActivity()
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val details = viewModel.uiState.details
@@ -201,6 +214,14 @@ private fun PlayerContent(
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(viewModel.mediaSourceFactory)
             .setLoadControl(loadControl)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            )
+            .setHandleAudioBecomingNoisy(true)
             .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS)
             .build()
             .apply {
@@ -209,6 +230,16 @@ private fun PlayerContent(
                 playWhenReady = !autoPlayBlocked
             }
     }
+    var trackDialogVisible by remember(player) { mutableStateOf(false) }
+    var audioTrackOptions by remember(player) { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
+    var subtitleTrackOptions by remember(player) { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
+    var selectedAudioTrackId by remember(player) { mutableStateOf(AUTOMATIC_TRACK_ID) }
+    var selectedSubtitleTrackId by remember(player) { mutableStateOf(SUBTITLES_OFF_TRACK_ID) }
+    var preferredAudioLanguage by remember { mutableStateOf<String?>(null) }
+    var preferredSubtitleLanguage by remember { mutableStateOf<String?>(null) }
+    var subtitlesPreferred by remember { mutableStateOf(false) }
+    var trackPreferencesApplied by remember(player) { mutableStateOf(false) }
+    val trackMenuAvailable = audioTrackOptions.size > 1 || subtitleTrackOptions.isNotEmpty()
 
     fun logPlaybackDiagnostic(
         event: String,
@@ -235,6 +266,54 @@ private fun PlayerContent(
 
     fun saveProgress() {
         viewModel.saveProgress(player.currentPosition, player.duration)
+    }
+
+    fun selectAudioTrack(option: PlayerTrackOption?) {
+        selectedAudioTrackId = option?.id ?: AUTOMATIC_TRACK_ID
+        preferredAudioLanguage = option?.language.normalizedLanguageTag()
+        val builder = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+        option?.let {
+            builder.setOverrideForType(TrackSelectionOverride(it.mediaTrackGroup, it.trackIndex))
+        }
+        player.trackSelectionParameters = builder.build()
+    }
+
+    fun selectSubtitleTrack(option: PlayerTrackOption?) {
+        selectedSubtitleTrackId = option?.id ?: SUBTITLES_OFF_TRACK_ID
+        subtitlesPreferred = option != null
+        preferredSubtitleLanguage = option?.language.normalizedLanguageTag()
+        val builder = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, option == null)
+        option?.let {
+            builder.setOverrideForType(TrackSelectionOverride(it.mediaTrackGroup, it.trackIndex))
+        }
+        player.trackSelectionParameters = builder.build()
+    }
+
+    fun updateTrackOptions(tracks: Tracks) {
+        val catalog = tracks.toPlayerTrackCatalog()
+        audioTrackOptions = catalog.audio
+        subtitleTrackOptions = catalog.subtitles
+        if (trackPreferencesApplied || tracks.isEmpty) return
+
+        trackPreferencesApplied = true
+        val audioMatch = findMatchingTrackLanguage(
+            preferredAudioLanguage,
+            catalog.audio.map { it.language }
+        )?.let(catalog.audio::get)
+        val subtitleMatch = if (subtitlesPreferred) {
+            findMatchingTrackLanguage(
+                preferredSubtitleLanguage,
+                catalog.subtitles.map { it.language }
+            )?.let(catalog.subtitles::get)
+        } else {
+            null
+        }
+        selectAudioTrack(audioMatch)
+        selectSubtitleTrack(subtitleMatch)
     }
 
     fun retryPlayback() {
@@ -290,6 +369,21 @@ private fun PlayerContent(
         }
     }
 
+    DisposableEffect(lifecycleOwner, player) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                logPlaybackDiagnostic("playback_backgrounded")
+                saveProgress()
+                player.pause()
+                controlsVisible = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     LaunchedEffect(player, viewModel.savedProgressByKey, viewModel.detailIndex, episodeUrl) {
         if (!resumeApplied) {
             val resumePositionMs = viewModel.resumePositionForCurrentEpisode()
@@ -316,8 +410,24 @@ private fun PlayerContent(
         }
     }
 
-    LaunchedEffect(controlsVisible, controlsLocked, drawerVisible, speedMenuExpanded, isPlaying, playbackError) {
-        if (controlsVisible && !controlsLocked && !drawerVisible && !speedMenuExpanded && isPlaying && playbackError == null) {
+    LaunchedEffect(
+        controlsVisible,
+        controlsLocked,
+        drawerVisible,
+        trackDialogVisible,
+        speedMenuExpanded,
+        isPlaying,
+        playbackError
+    ) {
+        if (
+            controlsVisible &&
+            !controlsLocked &&
+            !drawerVisible &&
+            !trackDialogVisible &&
+            !speedMenuExpanded &&
+            isPlaying &&
+            playbackError == null
+        ) {
             delay(3500)
             controlsVisible = false
         }
@@ -367,6 +477,10 @@ private fun PlayerContent(
                 playbackSpeed = playbackParameters.speed
             }
 
+            override fun onTracksChanged(tracks: Tracks) {
+                updateTrackOptions(tracks)
+            }
+
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 logPlaybackDiagnostic(
                     event = "play_when_ready_changed",
@@ -375,6 +489,22 @@ private fun PlayerContent(
                         "reason" to reason.diagnosticPlayWhenReadyReason()
                     )
                 )
+                if (shouldFlushForPlayWhenReadyChange(playWhenReady, reason)) {
+                    saveProgress()
+                    controlsVisible = true
+                }
+            }
+
+            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+                logPlaybackDiagnostic(
+                    event = "playback_suppression_changed",
+                    extraFields = mapOf("reason" to playbackSuppressionReason)
+                )
+                if (shouldPauseForPlaybackSuppression(playbackSuppressionReason)) {
+                    saveProgress()
+                    player.pause()
+                    controlsVisible = true
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -394,6 +524,7 @@ private fun PlayerContent(
         isPlaying = player.isPlaying
         playbackState = player.playbackState
         playbackSpeed = player.playbackParameters.speed
+        updateTrackOptions(player.currentTracks)
         logPlaybackDiagnostic(
             event = "playback_session_started",
             extraFields = mapOf(
@@ -431,6 +562,7 @@ private fun PlayerContent(
                 controlsVisible = controlsVisible,
                 controlsLocked = controlsLocked,
                 speedMenuExpanded = speedMenuExpanded,
+                trackMenuAvailable = trackMenuAvailable,
                 resizeMode = resizeMode,
                 resizeLabel = resizeOption.label,
                 gestureMessage = gestureMessage,
@@ -464,6 +596,10 @@ private fun PlayerContent(
                 onRetry = ::retryPlayback,
                 onNextLine = ::switchToNextLine,
                 onShowEpisodes = { drawerVisible = true },
+                onShowTracks = {
+                    speedMenuExpanded = false
+                    trackDialogVisible = true
+                },
                 onToggleLock = {
                     val nextLocked = !controlsLocked
                     controlsLocked = nextLocked
@@ -527,6 +663,7 @@ private fun PlayerContent(
                         controlsVisible = controlsVisible,
                         controlsLocked = controlsLocked,
                         speedMenuExpanded = speedMenuExpanded,
+                        trackMenuAvailable = trackMenuAvailable,
                         resizeMode = resizeMode,
                         resizeLabel = resizeOption.label,
                         gestureMessage = gestureMessage,
@@ -556,6 +693,10 @@ private fun PlayerContent(
                         onRetry = ::retryPlayback,
                         onNextLine = ::switchToNextLine,
                         onShowEpisodes = { drawerVisible = true },
+                        onShowTracks = {
+                            speedMenuExpanded = false
+                            trackDialogVisible = true
+                        },
                         onToggleLock = {
                             val nextLocked = !controlsLocked
                             controlsLocked = nextLocked
@@ -647,6 +788,7 @@ private fun PlayerContent(
                     controlsVisible = controlsVisible,
                     controlsLocked = controlsLocked,
                     speedMenuExpanded = speedMenuExpanded,
+                    trackMenuAvailable = trackMenuAvailable,
                     resizeMode = resizeMode,
                     resizeLabel = resizeOption.label,
                     gestureMessage = gestureMessage,
@@ -676,6 +818,10 @@ private fun PlayerContent(
                     onRetry = ::retryPlayback,
                     onNextLine = ::switchToNextLine,
                     onShowEpisodes = { drawerVisible = true },
+                    onShowTracks = {
+                        speedMenuExpanded = false
+                        trackDialogVisible = true
+                    },
                     onToggleLock = {
                         val nextLocked = !controlsLocked
                         controlsLocked = nextLocked
@@ -766,6 +912,18 @@ private fun PlayerContent(
                 }
             )
         }
+
+        if (trackDialogVisible && trackMenuAvailable) {
+            TrackSelectionDialog(
+                audioTracks = audioTrackOptions,
+                subtitleTracks = subtitleTrackOptions,
+                selectedAudioTrackId = selectedAudioTrackId,
+                selectedSubtitleTrackId = selectedSubtitleTrackId,
+                onSelectAudio = ::selectAudioTrack,
+                onSelectSubtitle = ::selectSubtitleTrack,
+                onDismiss = { trackDialogVisible = false }
+            )
+        }
     }
 }
 
@@ -786,6 +944,7 @@ private fun PlayerSurface(
     controlsVisible: Boolean,
     controlsLocked: Boolean,
     speedMenuExpanded: Boolean,
+    trackMenuAvailable: Boolean,
     resizeMode: Int,
     resizeLabel: String,
     gestureMessage: String?,
@@ -801,6 +960,7 @@ private fun PlayerSurface(
     onRetry: () -> Unit,
     onNextLine: () -> Unit,
     onShowEpisodes: () -> Unit,
+    onShowTracks: () -> Unit,
     onToggleLock: () -> Unit,
     onCycleResize: () -> Unit,
     onSpeedMenuExpandedChange: (Boolean) -> Unit,
@@ -947,12 +1107,14 @@ private fun PlayerSurface(
                 playbackSpeed = playbackSpeed,
                 isPlaying = isPlaying,
                 speedMenuExpanded = speedMenuExpanded,
+                trackMenuAvailable = trackMenuAvailable,
                 resizeLabel = resizeLabel,
                 onSeekTo = onSeekTo,
                 onTogglePlay = onTogglePlay,
                 onPrevious = onPrevious,
                 onNext = onNext,
                 onShowEpisodes = onShowEpisodes,
+                onShowTracks = onShowTracks,
                 onCycleResize = onCycleResize,
                 onSpeedMenuExpandedChange = onSpeedMenuExpandedChange,
                 onSelectSpeed = onSelectSpeed,
@@ -1061,12 +1223,14 @@ private fun PlayerBottomControls(
     playbackSpeed: Float,
     isPlaying: Boolean,
     speedMenuExpanded: Boolean,
+    trackMenuAvailable: Boolean,
     resizeLabel: String,
     onSeekTo: (Long) -> Unit,
     onTogglePlay: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onShowEpisodes: () -> Unit,
+    onShowTracks: () -> Unit,
     onCycleResize: () -> Unit,
     onSpeedMenuExpandedChange: (Boolean) -> Unit,
     onSelectSpeed: (Float) -> Unit,
@@ -1139,6 +1303,15 @@ private fun PlayerBottomControls(
                 sizeDp = buttonSize,
                 iconSizeDp = iconSize
             )
+            if (trackMenuAvailable) {
+                PlayerIconButton(
+                    icon = PlayerIcon.Tracks,
+                    contentDescription = "音轨和字幕",
+                    onClick = onShowTracks,
+                    sizeDp = buttonSize,
+                    iconSizeDp = iconSize
+                )
+            }
             PlayerIconButton(
                 icon = PlayerIcon.AspectRatio,
                 contentDescription = "画面比例 $resizeLabel",
@@ -1164,6 +1337,107 @@ private fun PlayerBottomControls(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TrackSelectionDialog(
+    audioTracks: List<PlayerTrackOption>,
+    subtitleTracks: List<PlayerTrackOption>,
+    selectedAudioTrackId: String,
+    selectedSubtitleTrackId: String,
+    onSelectAudio: (PlayerTrackOption?) -> Unit,
+    onSelectSubtitle: (PlayerTrackOption?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("音轨与字幕") },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 440.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                if (audioTracks.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "音轨",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                        )
+                    }
+                    item {
+                        TrackSelectionOptionRow(
+                            label = "自动",
+                            selected = selectedAudioTrackId == AUTOMATIC_TRACK_ID,
+                            onClick = { onSelectAudio(null) }
+                        )
+                    }
+                    itemsIndexed(audioTracks) { _, track ->
+                        TrackSelectionOptionRow(
+                            label = track.label,
+                            selected = selectedAudioTrackId == track.id,
+                            onClick = { onSelectAudio(track) }
+                        )
+                    }
+                }
+
+                if (subtitleTracks.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "字幕",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 2.dp)
+                        )
+                    }
+                    item {
+                        TrackSelectionOptionRow(
+                            label = "关闭",
+                            selected = selectedSubtitleTrackId == SUBTITLES_OFF_TRACK_ID,
+                            onClick = { onSelectSubtitle(null) }
+                        )
+                    }
+                    itemsIndexed(subtitleTracks) { _, track ->
+                        TrackSelectionOptionRow(
+                            label = track.label,
+                            selected = selectedSubtitleTrackId == track.id,
+                            onClick = { onSelectSubtitle(track) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("完成")
+            }
+        }
+    )
+}
+
+@Composable
+private fun TrackSelectionOptionRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = null
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1605,6 +1879,17 @@ private fun PlayerIconCanvas(
                     drawLine(color, Offset(w * 0.42f, y), Offset(w * 0.8f, y), strokeWidth = stroke.width, cap = StrokeCap.Round)
                 }
             }
+            PlayerIcon.Tracks -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(w * 0.18f, h * 0.25f),
+                    size = Size(w * 0.64f, h * 0.5f),
+                    style = Stroke(width = stroke.width)
+                )
+                drawLine(color, Offset(w * 0.3f, h * 0.5f), Offset(w * 0.46f, h * 0.5f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+                drawLine(color, Offset(w * 0.54f, h * 0.5f), Offset(w * 0.7f, h * 0.5f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+                drawLine(color, Offset(w * 0.36f, h * 0.63f), Offset(w * 0.64f, h * 0.63f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+            }
             PlayerIcon.AspectRatio -> {
                 val l = w * 0.2f
                 val r = w * 0.8f
@@ -1791,12 +2076,62 @@ private enum class PlayerIcon {
     SkipPrevious,
     SkipNext,
     Episodes,
+    Tracks,
     AspectRatio,
     Fullscreen,
     FullscreenExit,
     LockClosed,
     LockOpen
 }
+
+private data class PlayerTrackOption(
+    val id: String,
+    val label: String,
+    val language: String?,
+    val mediaTrackGroup: TrackGroup,
+    val trackIndex: Int
+)
+
+private data class PlayerTrackCatalog(
+    val audio: List<PlayerTrackOption>,
+    val subtitles: List<PlayerTrackOption>
+)
+
+private fun Tracks.toPlayerTrackCatalog(): PlayerTrackCatalog {
+    val audio = mutableListOf<PlayerTrackOption>()
+    val subtitles = mutableListOf<PlayerTrackOption>()
+    groups.forEachIndexed { groupIndex, group ->
+        if (group.type != C.TRACK_TYPE_AUDIO && group.type != C.TRACK_TYPE_TEXT) return@forEachIndexed
+        repeat(group.length) { trackIndex ->
+            if (!group.isTrackSupported(trackIndex)) return@repeat
+            val target = if (group.type == C.TRACK_TYPE_AUDIO) audio else subtitles
+            val format = group.getTrackFormat(trackIndex)
+            target += PlayerTrackOption(
+                id = "${group.type}:$groupIndex:$trackIndex",
+                label = format.playerTrackLabel(
+                    fallback = if (group.type == C.TRACK_TYPE_AUDIO) "音轨" else "字幕",
+                    ordinal = target.size + 1
+                ),
+                language = format.language.normalizedLanguageTag(),
+                mediaTrackGroup = group.mediaTrackGroup,
+                trackIndex = trackIndex
+            )
+        }
+    }
+    return PlayerTrackCatalog(audio = audio, subtitles = subtitles)
+}
+
+private fun Format.playerTrackLabel(fallback: String, ordinal: Int): String {
+    label?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    language.normalizedLanguageTag()?.let { tag ->
+        val displayLanguage = Locale.forLanguageTag(tag).getDisplayLanguage(Locale.getDefault())
+        if (displayLanguage.isNotBlank()) return displayLanguage
+    }
+    return "$fallback $ordinal"
+}
+
+private const val AUTOMATIC_TRACK_ID = "automatic"
+private const val SUBTITLES_OFF_TRACK_ID = "subtitles_off"
 
 private data class ResizeOption(
     val mode: Int,
@@ -1832,6 +2167,18 @@ private fun NetworkSnapshot.diagnosticName(): String = when {
     wifiLike -> "wifi_or_ethernet"
     else -> "other"
 }
+
+internal fun shouldPauseForPlaybackSuppression(reason: Int): Boolean =
+    reason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS
+
+internal fun shouldFlushForPlayWhenReadyChange(
+    playWhenReady: Boolean,
+    reason: Int
+): Boolean =
+    !playWhenReady && (
+        reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
+            reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY
+        )
 
 private fun Int.diagnosticPlayWhenReadyReason(): String = when (this) {
     Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> "user_request"

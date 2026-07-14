@@ -38,12 +38,16 @@ import com.untr.medeo.data.diagnostics.DiagnosticLogStatus
 import com.untr.medeo.data.local.AppSettings
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.data.local.SettingsStore
+import com.untr.medeo.data.local.SourceHealthRecord
+import com.untr.medeo.data.local.SourceHealthStatus
 import com.untr.medeo.data.repo.CacheUsage
 import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
 import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.LoadingState
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -223,13 +227,27 @@ private fun TabletSettingsContent(
                             )
                         }
 
+                        state.sourceHealthMessage?.let { message ->
+                            item {
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                )
+                            }
+                        }
+
                         items(state.sources, key = { it.id }) { source ->
                             SourceRow(
                                 source = source,
                                 checked = source.id in settings.enabledSourceIds,
+                                health = state.sourceHealth[source.id],
+                                testing = source.id in state.testingSourceIds,
                                 onCheckedChange = { enabled ->
                                     viewModel.setSourceEnabled(source.id, enabled)
-                                }
+                                },
+                                onTest = { viewModel.testSource(source) }
                             )
                         }
                     }
@@ -327,13 +345,27 @@ private fun SettingsList(
             )
         }
 
+        state.sourceHealthMessage?.let { message ->
+            item {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                )
+            }
+        }
+
         items(state.sources, key = { it.id }) { source ->
             SourceRow(
                 source = source,
                 checked = source.id in settings.enabledSourceIds,
+                health = state.sourceHealth[source.id],
+                testing = source.id in state.testingSourceIds,
                 onCheckedChange = { enabled ->
                     viewModel.setSourceEnabled(source.id, enabled)
-                }
+                },
+                onTest = { viewModel.testSource(source) }
             )
         }
     }
@@ -402,14 +434,68 @@ private fun SourceManifestSettings(
 private fun SourceRow(
     source: VodSource,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    health: SourceHealthRecord?,
+    testing: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    onTest: () -> Unit
 ) {
-    SettingSwitchRow(
-        title = source.name,
-        subtitle = null,
-        checked = checked,
-        onCheckedChange = onCheckedChange
-    )
+    SettingSectionCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = source.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 16.dp)
+            )
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (testing) "正在测试 API" else health?.displayText() ?: "尚未测试 API",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (health?.status == SourceHealthStatus.UNAVAILABLE && !testing) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                onClick = onTest,
+                enabled = !testing
+            ) {
+                Text(if (testing) "测试中" else "测试")
+            }
+        }
+        Text(
+            text = "仅测试 API；API 可用不代表媒体一定可播放",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun SourceHealthRecord.displayText(): String {
+    val statusText = when (status) {
+        SourceHealthStatus.AVAILABLE -> "API 可用"
+        SourceHealthStatus.UNAVAILABLE -> "API 不可用"
+    }
+    val checkedTime = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        .format(Date(checkedAt))
+    return "$statusText · $checkedTime · ${durationMs} ms"
 }
 
 @Composable

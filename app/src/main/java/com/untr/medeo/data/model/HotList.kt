@@ -39,6 +39,20 @@ data class HotListResult(
     val typeFilters: List<HotFilter>
 )
 
+enum class HotContentType(
+    val title: String,
+    val defaultCategory: String,
+    val defaultType: String
+) {
+    MOVIE("电影", DEFAULT_HOT_CATEGORY, DEFAULT_HOT_TYPE),
+    TV("剧集", DEFAULT_TV_CATEGORY, DEFAULT_TV_TYPE);
+
+    companion object {
+        fun fromStoredValue(value: String?): HotContentType =
+            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: MOVIE
+    }
+}
+
 const val DEFAULT_HOT_CATEGORY = "热门"
 const val DEFAULT_HOT_TYPE = "全部"
 
@@ -56,3 +70,24 @@ val DEFAULT_HOT_TYPE_FILTERS = listOf(
     HotFilter(title = "韩国", category = DEFAULT_HOT_CATEGORY, type = "韩国"),
     HotFilter(title = "日本", category = DEFAULT_HOT_CATEGORY, type = "日本")
 )
+
+const val DEFAULT_TV_CATEGORY = "tv"
+const val DEFAULT_TV_TYPE = "tv"
+
+val DEFAULT_TV_CATEGORY_FILTERS = listOf(
+    HotFilter(title = "剧集", category = DEFAULT_TV_CATEGORY, type = DEFAULT_TV_TYPE)
+)
+
+val DEFAULT_TV_TYPE_FILTERS = listOf(
+    HotFilter(title = "剧集", category = DEFAULT_TV_CATEGORY, type = DEFAULT_TV_TYPE)
+)
+
+fun HotContentType.defaultCategoryFilters(): List<HotFilter> = when (this) {
+    HotContentType.MOVIE -> DEFAULT_HOT_CATEGORY_FILTERS
+    HotContentType.TV -> DEFAULT_TV_CATEGORY_FILTERS
+}
+
+fun HotContentType.defaultTypeFilters(category: String = defaultCategory): List<HotFilter> = when (this) {
+    HotContentType.MOVIE -> DEFAULT_HOT_TYPE_FILTERS.map { it.copy(category = category) }
+    HotContentType.TV -> DEFAULT_TV_TYPE_FILTERS.map { it.copy(category = category) }
+}

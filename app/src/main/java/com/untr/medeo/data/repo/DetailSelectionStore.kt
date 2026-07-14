@@ -17,6 +17,11 @@ class DetailSelectionStore @Inject constructor() {
         remember(result.primary.key, result.perSource)
     }
 
+    fun remember(items: List<VodItem>) {
+        val primary = items.firstOrNull() ?: return
+        remember(primary.key, items)
+    }
+
     fun candidates(sourceId: String, vodId: Long): List<VodItem> =
         selections["$sourceId|$vodId"].orEmpty()
 

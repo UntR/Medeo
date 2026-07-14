@@ -13,9 +13,11 @@ import com.untr.medeo.data.diagnostics.DiagnosticLogStatus
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.data.local.AppSettings
 import com.untr.medeo.data.local.SettingsStore
+import com.untr.medeo.data.local.SourceHealthRecord
 import com.untr.medeo.data.repo.CacheManager
 import com.untr.medeo.data.repo.CacheUsage
 import com.untr.medeo.data.repo.SourceUpdateRepository
+import com.untr.medeo.data.repo.SourceHealthRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import javax.inject.Inject
@@ -28,6 +30,9 @@ data class SettingsUiState(
     val sourceManifestUrlDraft: String = "",
     val cacheUsage: CacheUsage? = null,
     val refreshingSources: Boolean = false,
+    val sourceHealth: Map<String, SourceHealthRecord> = emptyMap(),
+    val testingSourceIds: Set<String> = emptySet(),
+    val sourceHealthMessage: String? = null,
     val clearingCache: Boolean = false,
     val diagnosticLogStatus: DiagnosticLogStatus = DiagnosticLogStatus(),
     val diagnosticMessage: String? = null,
@@ -41,6 +46,7 @@ class SettingsViewModel @Inject constructor(
     private val cacheManager: CacheManager,
     private val sourceCatalog: SourceCatalog,
     private val sourceUpdateRepository: SourceUpdateRepository,
+    private val sourceHealthRepository: SourceHealthRepository,
     private val diagnosticLogger: DiagnosticLogger
 ) : ViewModel() {
     var uiState by mutableStateOf(SettingsUiState())
@@ -69,6 +75,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            settingsStore.sourceHealth.collect { sourceHealth ->
+                uiState = uiState.copy(sourceHealth = sourceHealth)
+            }
+        }
+        viewModelScope.launch {
             diagnosticLogger.status.collect { status ->
                 uiState = uiState.copy(diagnosticLogStatus = status)
             }
@@ -79,6 +90,28 @@ class SettingsViewModel @Inject constructor(
     fun setSourceEnabled(sourceId: String, enabled: Boolean) {
         viewModelScope.launch {
             settingsStore.setSourceEnabled(sourceId, enabled)
+        }
+    }
+
+    fun testSource(source: VodSource) {
+        if (source.id in uiState.testingSourceIds) return
+        uiState = uiState.copy(
+            testingSourceIds = uiState.testingSourceIds + source.id,
+            sourceHealthMessage = null
+        )
+        viewModelScope.launch {
+            runCatching { sourceHealthRepository.test(source) }
+                .onSuccess { record ->
+                    uiState = uiState.copy(
+                        sourceHealth = uiState.sourceHealth + (source.id to record)
+                    )
+                }
+                .onFailure {
+                    uiState = uiState.copy(sourceHealthMessage = "数据源测试失败，请稍后重试")
+                }
+            uiState = uiState.copy(
+                testingSourceIds = uiState.testingSourceIds - source.id
+            )
         }
     }
 
