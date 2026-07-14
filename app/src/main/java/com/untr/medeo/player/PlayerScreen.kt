@@ -741,6 +741,8 @@ private fun PlayerSurface(
     modifier: Modifier = Modifier
 ) {
     val showControls = (controlsVisible || !isPlaying || playbackError != null || speedMenuExpanded) && !controlsLocked
+    val shouldKeepScreenOn =
+        playbackError == null && player.playWhenReady && playbackState != Player.STATE_ENDED
     val safeDuration = duration.takeIf { it.isFiniteDuration() } ?: 0L
     val safePosition = currentPosition.coerceIn(0L, safeDuration.takeIf { it > 0L } ?: Long.MAX_VALUE)
     val bufferedPercent = if (safeDuration > 0L) {
@@ -768,11 +770,13 @@ private fun PlayerSurface(
                     this.player = player
                     useController = false
                     this.resizeMode = resizeMode
+                    keepScreenOn = shouldKeepScreenOn
                 }
             },
             update = {
                 it.player = player
                 it.resizeMode = resizeMode
+                it.keepScreenOn = shouldKeepScreenOn
             },
             modifier = Modifier.fillMaxSize()
         )
