@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import com.untr.medeo.data.api.SourceCatalog
 import com.untr.medeo.data.api.VodSource
+import com.untr.medeo.data.diagnostics.DiagnosticLogger
+import com.untr.medeo.data.diagnostics.DiagnosticLogStatus
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.data.local.AppSettings
 import com.untr.medeo.data.local.SettingsStore
@@ -15,6 +17,7 @@ import com.untr.medeo.data.repo.CacheManager
 import com.untr.medeo.data.repo.CacheUsage
 import com.untr.medeo.data.repo.SourceUpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.launch
 
@@ -26,6 +29,8 @@ data class SettingsUiState(
     val cacheUsage: CacheUsage? = null,
     val refreshingSources: Boolean = false,
     val clearingCache: Boolean = false,
+    val diagnosticLogStatus: DiagnosticLogStatus = DiagnosticLogStatus(),
+    val diagnosticMessage: String? = null,
     val message: String? = null
 )
 
@@ -35,7 +40,8 @@ class SettingsViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val cacheManager: CacheManager,
     private val sourceCatalog: SourceCatalog,
-    private val sourceUpdateRepository: SourceUpdateRepository
+    private val sourceUpdateRepository: SourceUpdateRepository,
+    private val diagnosticLogger: DiagnosticLogger
 ) : ViewModel() {
     var uiState by mutableStateOf(SettingsUiState())
         private set
@@ -60,6 +66,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             sourceCatalog.sources.collect { sources ->
                 uiState = uiState.copy(sources = sources)
+            }
+        }
+        viewModelScope.launch {
+            diagnosticLogger.status.collect { status ->
+                uiState = uiState.copy(diagnosticLogStatus = status)
             }
         }
         refreshCacheUsage()
@@ -148,6 +159,37 @@ class SettingsViewModel @Inject constructor(
                         message = "清空失败: ${error.message ?: error::class.java.simpleName}"
                     )
                 }
+        }
+    }
+
+    fun setDiagnosticLogging(enabled: Boolean) {
+        if (enabled) {
+            diagnosticLogger.start()
+        } else {
+            diagnosticLogger.stop()
+        }
+        uiState = uiState.copy(
+            diagnosticMessage = if (enabled) "诊断日志已开启" else "诊断日志已关闭"
+        )
+    }
+
+    fun exportDiagnosticLog(onReady: (File) -> Unit) {
+        viewModelScope.launch {
+            val file = diagnosticLogger.export()
+            if (file == null) {
+                uiState = uiState.copy(diagnosticMessage = "没有可导出的诊断日志")
+            } else {
+                uiState = uiState.copy(diagnosticMessage = null)
+                onReady(file)
+            }
+        }
+    }
+
+    fun clearDiagnosticLog() {
+        viewModelScope.launch {
+            diagnosticLogger.stop()
+            diagnosticLogger.clear()
+            uiState = uiState.copy(diagnosticMessage = "诊断日志已关闭并清除")
         }
     }
 

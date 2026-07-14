@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.media.AudioManager
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -79,11 +80,16 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.untr.medeo.data.model.VodDetail
+import com.untr.medeo.data.net.NETWORK_CONNECT_TIMEOUT_MS
+import com.untr.medeo.data.net.NETWORK_READ_TIMEOUT_MS
+import com.untr.medeo.data.net.NETWORK_WRITE_TIMEOUT_MS
+import com.untr.medeo.data.net.NetworkSnapshot
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
 import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.EpisodeListRow
@@ -177,6 +183,10 @@ private fun PlayerContent(
     ).joinToString(" / ")
     val useFullscreen = immersiveRequested || (isLandscape && !windowClass.usesWideLayout)
     val useTheaterLayout = windowClass.usesWideLayout && !useFullscreen
+    val diagnosticSourceId = detail?.item?.sourceId.orEmpty()
+    val diagnosticLineIndex = viewModel.playSourceIndex
+    val diagnosticEpisodeIndex = viewModel.episodeIndex
+    val playbackStartedAt = remember(episodeUrl) { SystemClock.elapsedRealtime() }
 
     val player = remember(episodeUrl, autoPlayBlocked) {
         val loadControl = DefaultLoadControl.Builder()
@@ -200,11 +210,35 @@ private fun PlayerContent(
             }
     }
 
+    fun logPlaybackDiagnostic(
+        event: String,
+        extraFields: Map<String, Any?> = emptyMap()
+    ) {
+        if (!viewModel.isDiagnosticLoggingEnabled()) return
+        val network = viewModel.currentNetworkSnapshot()
+        val fields = linkedMapOf<String, Any?>(
+            "source_id" to diagnosticSourceId,
+            "line_index" to diagnosticLineIndex,
+            "episode_index" to diagnosticEpisodeIndex,
+            "elapsed_ms" to (SystemClock.elapsedRealtime() - playbackStartedAt),
+            "playback_state" to player.playbackState.diagnosticName(),
+            "play_when_ready" to player.playWhenReady,
+            "is_playing" to player.isPlaying,
+            "position_ms" to player.currentPosition.coerceAtLeast(0L),
+            "buffered_position_ms" to player.bufferedPosition.coerceAtLeast(0L),
+            "duration_ms" to (player.duration.takeIf { it.isFiniteDuration() } ?: 0L),
+            "network" to network.diagnosticName()
+        )
+        fields.putAll(extraFields)
+        viewModel.logDiagnostic(event, fields)
+    }
+
     fun saveProgress() {
         viewModel.saveProgress(player.currentPosition, player.duration)
     }
 
     fun retryPlayback() {
+        logPlaybackDiagnostic("playback_retry")
         playbackError = null
         player.stop()
         player.clearMediaItems()
@@ -232,6 +266,7 @@ private fun PlayerContent(
     }
 
     fun switchToNextLine() {
+        logPlaybackDiagnostic("playback_next_line")
         saveProgress()
         playbackError = null
         viewModel.nextSourceOrLine()
@@ -299,10 +334,18 @@ private fun PlayerContent(
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlayingValue: Boolean) {
                 isPlaying = isPlayingValue
+                logPlaybackDiagnostic(
+                    event = "is_playing_changed",
+                    extraFields = mapOf("value" to isPlayingValue)
+                )
             }
 
             override fun onPlaybackStateChanged(playbackStateValue: Int) {
                 playbackState = playbackStateValue
+                logPlaybackDiagnostic(
+                    event = "playback_state_changed",
+                    extraFields = mapOf("value" to playbackStateValue.diagnosticName())
+                )
                 if (
                     playbackStateValue == Player.STATE_ENDED &&
                     !playbackEndHandled &&
@@ -324,7 +367,25 @@ private fun PlayerContent(
                 playbackSpeed = playbackParameters.speed
             }
 
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                logPlaybackDiagnostic(
+                    event = "play_when_ready_changed",
+                    extraFields = mapOf(
+                        "value" to playWhenReady,
+                        "reason" to reason.diagnosticPlayWhenReadyReason()
+                    )
+                )
+            }
+
             override fun onPlayerError(error: PlaybackException) {
+                logPlaybackDiagnostic(
+                    event = "playback_error",
+                    extraFields = mapOf(
+                        "error_code" to error.errorCodeName,
+                        "cause_chain" to error.diagnosticCauseChain(),
+                        "http_status" to error.diagnosticHttpStatus()
+                    )
+                )
                 playbackError = error.toUserMessage()
                 controlsVisible = true
             }
@@ -333,7 +394,16 @@ private fun PlayerContent(
         isPlaying = player.isPlaying
         playbackState = player.playbackState
         playbackSpeed = player.playbackParameters.speed
+        logPlaybackDiagnostic(
+            event = "playback_session_started",
+            extraFields = mapOf(
+                "connect_timeout_ms" to NETWORK_CONNECT_TIMEOUT_MS,
+                "read_timeout_ms" to NETWORK_READ_TIMEOUT_MS,
+                "write_timeout_ms" to NETWORK_WRITE_TIMEOUT_MS
+            )
+        )
         onDispose {
+            logPlaybackDiagnostic("playback_session_stopped")
             saveProgress()
             player.removeListener(listener)
             player.release()
@@ -1748,6 +1818,53 @@ private fun List<ResizeOption>.nextAfter(currentMode: Int): ResizeOption {
 }
 
 private fun Long.isFiniteDuration(): Boolean = this > 0L && this != C.TIME_UNSET
+
+private fun Int.diagnosticName(): String = when (this) {
+    Player.STATE_IDLE -> "idle"
+    Player.STATE_BUFFERING -> "buffering"
+    Player.STATE_READY -> "ready"
+    Player.STATE_ENDED -> "ended"
+    else -> "unknown_$this"
+}
+
+private fun NetworkSnapshot.diagnosticName(): String = when {
+    !online -> "offline"
+    wifiLike -> "wifi_or_ethernet"
+    else -> "other"
+}
+
+private fun Int.diagnosticPlayWhenReadyReason(): String = when (this) {
+    Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> "user_request"
+    Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> "audio_focus_loss"
+    Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY -> "audio_becoming_noisy"
+    Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE -> "remote"
+    Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM -> "end_of_media_item"
+    Player.PLAY_WHEN_READY_CHANGE_REASON_SUPPRESSED_TOO_LONG -> "suppressed_too_long"
+    else -> "unknown_$this"
+}
+
+private fun Throwable.diagnosticCauseChain(): String {
+    val names = mutableListOf<String>()
+    var current: Throwable? = this
+    while (current != null && names.size < 8) {
+        val error = current ?: break
+        names += error::class.java.simpleName.ifBlank { error::class.java.name.substringAfterLast('.') }
+        val next = error.cause
+        current = next.takeUnless { it === error }
+    }
+    return names.joinToString(">")
+}
+
+private fun Throwable.diagnosticHttpStatus(): Int? {
+    var current: Throwable? = this
+    repeat(8) {
+        val error = current ?: return null
+        if (error is HttpDataSource.InvalidResponseCodeException) return error.responseCode
+        val next = error.cause
+        current = next.takeUnless { it === error }
+    }
+    return null
+}
 
 private fun VodDetail.displayPlaySourceLabel(index: Int): String {
     val sourceName = item.sourceName.ifBlank { item.sourceId }

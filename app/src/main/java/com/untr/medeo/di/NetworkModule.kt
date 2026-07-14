@@ -4,6 +4,9 @@ import android.content.Context
 import com.untr.medeo.BuildConfig
 import com.untr.medeo.data.api.DoubanHotApi
 import com.untr.medeo.data.local.CacheConfigStore
+import com.untr.medeo.data.net.NETWORK_CONNECT_TIMEOUT_MS
+import com.untr.medeo.data.net.NETWORK_READ_TIMEOUT_MS
+import com.untr.medeo.data.net.NETWORK_WRITE_TIMEOUT_MS
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import dagger.Module
@@ -74,7 +77,7 @@ object NetworkModule {
                     .header(
                         "User-Agent",
                         "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
-                            "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/v0.1.3"
+                            "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 Medeo/v0.1.5"
                     )
                     .header("Accept", "*/*")
                     .header("Referer", "https://movie.douban.com/explore")
@@ -107,9 +110,9 @@ object NetworkModule {
 
     private fun baseClientBuilder(): OkHttpClient.Builder =
         OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(NETWORK_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(NETWORK_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(NETWORK_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
 
     private fun loggingInterceptor(): HttpLoggingInterceptor =
         HttpLoggingInterceptor().apply {

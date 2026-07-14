@@ -1,5 +1,7 @@
 package com.untr.medeo.ui.settings
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,11 +27,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
+import androidx.core.content.FileProvider
 import com.untr.medeo.data.api.VodSource
+import com.untr.medeo.data.diagnostics.DiagnosticLogStatus
 import com.untr.medeo.data.local.AppSettings
 import com.untr.medeo.data.local.AppThemeMode
 import com.untr.medeo.data.local.SettingsStore
@@ -38,6 +43,7 @@ import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
 import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
 import com.untr.medeo.ui.components.LoadingState
+import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -112,6 +118,7 @@ private fun TabletSettingsContent(
     windowClass: MedeoWindowClass,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -159,6 +166,18 @@ private fun TabletSettingsContent(
                                 subtitle = if (settings.wifiOnlyPlay) "已开启" else "已关闭",
                                 checked = settings.wifiOnlyPlay,
                                 onCheckedChange = viewModel::setWifiOnlyPlay
+                            )
+                        }
+
+                        item {
+                            DiagnosticLogCard(
+                                status = state.diagnosticLogStatus,
+                                message = state.diagnosticMessage,
+                                onEnabledChange = viewModel::setDiagnosticLogging,
+                                onExport = {
+                                    viewModel.exportDiagnosticLog(context::shareDiagnosticLog)
+                                },
+                                onClear = viewModel::clearDiagnosticLog
                             )
                         }
 
@@ -228,6 +247,7 @@ private fun SettingsList(
     viewModel: SettingsViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     LazyColumn(
         modifier = modifier.background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(16.dp),
@@ -258,6 +278,18 @@ private fun SettingsList(
                 subtitle = if (settings.wifiOnlyPlay) "已开启" else "已关闭",
                 checked = settings.wifiOnlyPlay,
                 onCheckedChange = viewModel::setWifiOnlyPlay
+            )
+        }
+
+        item {
+            DiagnosticLogCard(
+                status = state.diagnosticLogStatus,
+                message = state.diagnosticMessage,
+                onEnabledChange = viewModel::setDiagnosticLogging,
+                onExport = {
+                    viewModel.exportDiagnosticLog(context::shareDiagnosticLog)
+                },
+                onClear = viewModel::clearDiagnosticLog
             )
         }
 
@@ -378,6 +410,69 @@ private fun SourceRow(
         checked = checked,
         onCheckedChange = onCheckedChange
     )
+}
+
+@Composable
+private fun DiagnosticLogCard(
+    status: DiagnosticLogStatus,
+    message: String?,
+    onEnabledChange: (Boolean) -> Unit,
+    onExport: () -> Unit,
+    onClear: () -> Unit
+) {
+    SettingSectionCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 16.dp)
+            ) {
+                Text(
+                    text = "播放诊断日志",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (status.enabled) "已开启，仅本次运行" else "已关闭",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            Switch(
+                checked = status.enabled,
+                onCheckedChange = onEnabledChange
+            )
+        }
+        Text(
+            text = "日志大小 ${status.sizeBytes.toReadableDiagnosticSize()}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 10.dp)
+        )
+        Row(
+            modifier = Modifier.padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(onClick = onExport, enabled = status.hasLog) {
+                Text("导出")
+            }
+            TextButton(onClick = onClear, enabled = status.hasLog) {
+                Text("清除")
+            }
+        }
+        message?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+    }
 }
 
 @Composable
@@ -550,6 +645,28 @@ private fun Long.toReadableSize(): String {
     } else {
         String.format(Locale.US, "%.1f MB", mb)
     }
+}
+
+private fun Long.toReadableDiagnosticSize(): String {
+    if (this <= 0L) return "0 KB"
+    if (this < 1024L * 1024L) {
+        return String.format(Locale.US, "%.1f KB", this / 1024.0)
+    }
+    return String.format(Locale.US, "%.1f MB", this / (1024.0 * 1024.0))
+}
+
+private fun Context.shareDiagnosticLog(file: File) {
+    val uri = FileProvider.getUriForFile(
+        this,
+        "$packageName.fileprovider",
+        file
+    )
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    startActivity(Intent.createChooser(shareIntent, "导出诊断日志"))
 }
 
 @Composable

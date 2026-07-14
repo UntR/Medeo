@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.source.MediaSource
 import com.untr.medeo.data.api.SourceCatalog
+import com.untr.medeo.data.diagnostics.DiagnosticLogger
 import com.untr.medeo.data.local.SettingsStore
 import com.untr.medeo.data.local.WatchProgress
 import com.untr.medeo.data.model.Episode
@@ -107,6 +108,7 @@ class PlayerViewModel @Inject constructor(
     private val sourceCatalog: SourceCatalog,
     private val settingsStore: SettingsStore,
     private val networkMonitor: NetworkMonitor,
+    private val diagnosticLogger: DiagnosticLogger,
     val mediaSourceFactory: MediaSource.Factory
 ) : ViewModel() {
     private val sourceId: String = savedStateHandle["sourceId"] ?: ""
@@ -176,6 +178,14 @@ class PlayerViewModel @Inject constructor(
     fun nextEpisode() {
         val source = uiState.playSource(detailIndex, playSourceIndex) ?: return
         if (episodeIndex < source.episodes.lastIndex) episodeIndex += 1
+    }
+
+    fun currentNetworkSnapshot(): NetworkSnapshot = networkMonitor.snapshot()
+
+    fun isDiagnosticLoggingEnabled(): Boolean = diagnosticLogger.isEnabled
+
+    fun logDiagnostic(event: String, fields: Map<String, Any?> = emptyMap()) {
+        diagnosticLogger.log(event, fields)
     }
 
     fun nextSourceOrLine() {
