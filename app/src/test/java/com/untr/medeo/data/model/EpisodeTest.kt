@@ -33,4 +33,10 @@ class EpisodeTest {
         assertFalse(Episode("1", "https://a.com/index.html").isDirectMedia())
         assertFalse(Episode("1", "https://pan.baidu.com/s/abc").isDirectMedia())
     }
+
+    @Test
+    fun hasExplicitMediaExtension_distinguishesKnownMediaFromAmbiguousCandidate() {
+        assertTrue(Episode("1", "https://a.com/index.M3U8?token=1").hasExplicitMediaExtension())
+        assertFalse(Episode("1", "https://a.com/play/123?token=1").hasExplicitMediaExtension())
+    }
 }

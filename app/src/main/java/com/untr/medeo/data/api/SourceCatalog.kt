@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
+
+internal const val REMOTE_SOURCE_MANIFEST_ENABLED = false
 @Singleton
 class SourceCatalog @Inject constructor(
     private val settingsStore: SettingsStore,
@@ -44,7 +46,9 @@ class SourceCatalog @Inject constructor(
     private fun mergeSources(remoteManifestJson: String?): List<VodSource> {
         return mergeVodSources(
             builtinSources = BUILTIN_SOURCES,
-            remoteManifestJson = remoteManifestJson,
+            remoteManifestJson = remoteManifestJson.takeIf {
+                REMOTE_SOURCE_MANIFEST_ENABLED
+            },
             manifestAdapter = manifestAdapter
         )
     }

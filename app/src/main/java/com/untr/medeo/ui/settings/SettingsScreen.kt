@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -25,6 +26,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.core.content.FileProvider
+import com.untr.medeo.BuildConfig
 import com.untr.medeo.data.api.VodSource
 import com.untr.medeo.data.diagnostics.DiagnosticLogStatus
 import com.untr.medeo.data.local.AppSettings
@@ -195,6 +201,10 @@ private fun TabletSettingsContent(
                                 onImageCacheMbChange = viewModel::setImageCacheMb,
                                 onClear = viewModel::clearCache
                             )
+                        }
+
+                        item {
+                            AboutCard()
                         }
 
                         if (SHOW_REMOTE_SOURCE_SETTINGS) {
@@ -368,6 +378,10 @@ private fun SettingsList(
                 onTest = { viewModel.testSource(source) }
             )
         }
+
+        item {
+            AboutCard()
+        }
     }
 }
 
@@ -380,7 +394,7 @@ private fun SettingsTitle() {
     )
 }
 
-private const val SHOW_REMOTE_SOURCE_SETTINGS = true
+private const val SHOW_REMOTE_SOURCE_SETTINGS = false
 
 @Composable
 private fun SourceManifestSettings(
@@ -431,7 +445,7 @@ private fun SourceManifestSettings(
 }
 
 @Composable
-private fun SourceRow(
+internal fun SourceRow(
     source: VodSource,
     checked: Boolean,
     health: SourceHealthRecord?,
@@ -481,7 +495,7 @@ private fun SourceRow(
             }
         }
         Text(
-            text = "仅测试 API；API 可用不代表媒体一定可播放",
+            text = "仅测试 API 基础列表；可用不代表关键词搜索或媒体播放一定可用",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -562,7 +576,7 @@ private fun DiagnosticLogCard(
 }
 
 @Composable
-private fun CacheCard(
+internal fun CacheCard(
     settings: AppSettings,
     usage: CacheUsage?,
     clearing: Boolean,
@@ -571,6 +585,33 @@ private fun CacheCard(
     onImageCacheMbChange: (Int) -> Unit,
     onClear: () -> Unit
 ) {
+    var showClearConfirmation by remember { mutableStateOf(false) }
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            title = { Text("清空全部缓存？") },
+            text = {
+                Text("将删除媒体、图片和接口缓存；不会删除收藏、观看进度或设置。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirmation = false
+                        onClear()
+                    },
+                    enabled = !clearing
+                ) {
+                    Text("确认清空")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmation = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     SettingSectionCard {
         Text(
             text = "缓存",
@@ -624,7 +665,7 @@ private fun CacheCard(
             modifier = Modifier.padding(top = 2.dp)
         )
         Button(
-            onClick = onClear,
+            onClick = { showClearConfirmation = true },
             enabled = !clearing,
             modifier = Modifier.padding(top = 12.dp)
         ) {
@@ -637,6 +678,29 @@ private fun CacheCard(
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
+    }
+}
+
+@Composable
+internal fun AboutCard() {
+    SettingSectionCard {
+        Text(
+            text = "关于",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "Medeo ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        Text(
+            text = "本项目采用 MIT License 开源；第三方组件遵循各自开源许可证。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp)
+        )
     }
 }
 
