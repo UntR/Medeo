@@ -4,6 +4,7 @@ import android.util.Log
 import com.untr.medeo.data.api.SourceCatalog
 import com.untr.medeo.data.api.VodClientFactory
 import com.untr.medeo.data.api.VodSource
+import com.untr.medeo.data.api.dto.VodListResponse
 import com.untr.medeo.data.model.AggregatedResult
 import com.untr.medeo.data.model.VodItem
 import com.untr.medeo.data.model.normalize
@@ -196,15 +197,15 @@ class SearchRepository @Inject constructor(
             )
         }
 
-        val responsePage = vodResponse.page.coerceAtLeast(page)
-        return SourceSearchResult(
-            items = vodResponse.list.map { dto -> dto.toDomain(source) },
-            pageState = SourcePageState(
-                currentPage = responsePage,
-                pageCount = vodResponse.pagecount.coerceAtLeast(responsePage)
-            ),
-            failed = false
+        val result = vodResponse.toSourceSearchResult(
+            source = source,
+            requestedPage = page,
+            previousState = previousState
         )
+        if (result.failed) {
+            Log.w("SearchRepository", "${source.name} search returned code ${vodResponse.code}")
+        }
+        return result
     }
 
     private fun aggregate(items: List<VodItem>, query: String): List<AggregatedResult> =
@@ -233,6 +234,33 @@ class SearchRepository @Inject constructor(
         sources: List<VodSource>
     ): Boolean =
         sources.any { source -> pageStates[source.id]?.hasMore == true }
+}
+
+internal fun VodListResponse.toSourceSearchResult(
+    source: VodSource,
+    requestedPage: Int,
+    previousState: SourcePageState?
+): SourceSearchResult {
+    if (code != 1) {
+        return SourceSearchResult(
+            items = emptyList(),
+            pageState = previousState ?: SourcePageState(
+                currentPage = requestedPage,
+                pageCount = requestedPage
+            ),
+            failed = true
+        )
+    }
+
+    val responsePage = page.coerceAtLeast(requestedPage)
+    return SourceSearchResult(
+        items = list.map { dto -> dto.toDomain(source) },
+        pageState = SourcePageState(
+            currentPage = responsePage,
+            pageCount = pagecount.coerceAtLeast(responsePage)
+        ),
+        failed = false
+    )
 }
 
 internal fun aggregateSearchResults(
@@ -282,13 +310,13 @@ private fun searchRelevanceRank(title: String, query: String): Int {
     }
 }
 
-private data class SourceSearchResult(
+internal data class SourceSearchResult(
     val items: List<VodItem>,
     val pageState: SourcePageState,
     val failed: Boolean
 )
 
-private data class SourcePageState(
+internal data class SourcePageState(
     val currentPage: Int,
     val pageCount: Int
 ) {

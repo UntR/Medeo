@@ -70,6 +70,54 @@ class PlaybackSelectionTest {
     }
 
     @Test
+    fun resolvePlaybackSelection_mapsEpisodeAfterCrossSourceLineChange() {
+        val detail = detail(
+            playSources = listOf(
+                PlaySource(
+                    name = "新线路",
+                    episodes = listOf(
+                        Episode("预告", "https://example.com/preview.m3u8"),
+                        Episode("第3集", "https://example.com/3.m3u8")
+                    )
+                )
+            )
+        )
+        val progress = progress(
+            playSourceName = "旧线路",
+            episodeIndex = 2,
+            episodeName = "第03集"
+        )
+
+        val selection = resolvePlaybackSelection(
+            detail = detail,
+            requestedPlaySourceIndex = RESUME_PLAYBACK_INDEX,
+            requestedEpisodeIndex = RESUME_PLAYBACK_INDEX,
+            progress = progress
+        )
+
+        assertEquals(PlaybackSelection(playSourceIndex = 0, episodeIndex = 1), selection)
+    }
+
+    @Test
+    fun resumePositionForSelection_usesMappedEpisodeAcrossSources() {
+        val playSource = PlaySource(
+            name = "新线路",
+            episodes = listOf(
+                Episode("预告", "https://example.com/preview.m3u8"),
+                Episode("第3集", "https://example.com/3.m3u8")
+            )
+        )
+        val progress = progress(
+            playSourceName = "旧线路",
+            episodeIndex = 2,
+            episodeName = "第03集"
+        )
+
+        assertEquals(60_000L, resumePositionForSelection(playSource, 1, progress))
+        assertEquals(0L, resumePositionForSelection(playSource, 0, progress))
+    }
+
+    @Test
     fun resolveProgressEpisodeIndex_prefersNormalizedEpisodeName() {
         val episodes = listOf(
             Episode("预告", "https://example.com/preview.m3u8"),

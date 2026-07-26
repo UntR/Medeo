@@ -259,14 +259,7 @@ class PlayerViewModel @Inject constructor(
             ?: savedProgressByKey[detail.item.key]
             ?: return 0L
         val playSource = uiState.playSource(detailIndex, playSourceIndex) ?: return 0L
-        return if (
-            progress.playSourceName == playSource.name &&
-            progress.episodeIndex == episodeIndex
-        ) {
-            progress.positionMs
-        } else {
-            0L
-        }
+        return resumePositionForSelection(playSource, episodeIndex, progress)
     }
 
     private fun load() {
@@ -423,3 +416,14 @@ internal fun mergePlaybackDetails(
     (current + incoming)
         .filter { detail -> detail.playSources.isNotEmpty() }
         .distinctBy { detail -> detail.item.key }
+
+internal fun resumePositionForSelection(
+    playSource: PlaySource,
+    episodeIndex: Int,
+    progress: WatchProgress
+): Long =
+    if (resolveProgressEpisodeIndex(playSource.episodes, progress) == episodeIndex) {
+        progress.positionMs.coerceAtLeast(0L)
+    } else {
+        0L
+    }

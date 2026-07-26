@@ -3,6 +3,7 @@ package com.untr.medeo.data.api
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class SourceCatalogTest {
@@ -10,6 +11,11 @@ class SourceCatalogTest {
         .add(KotlinJsonAdapterFactory())
         .build()
         .adapter(RemoteSourceManifest::class.java)
+
+    @Test
+    fun remoteSourceManifest_isDisabledForCurrentRelease() {
+        assertFalse(REMOTE_SOURCE_MANIFEST_ENABLED)
+    }
 
     @Test
     fun mergeVodSources_overridesBuiltinAndAppendsValidRemoteSources() {

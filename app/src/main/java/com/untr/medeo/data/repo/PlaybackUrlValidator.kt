@@ -1,18 +1,28 @@
 package com.untr.medeo.data.repo
 
 import android.util.Log
+import com.untr.medeo.data.model.PlaySource
 import com.untr.medeo.di.MediaOkHttpClient
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 data class PlaybackValidation(
     val playable: Boolean,
     val reason: String? = null
+)
+
+data class PlaybackPreflight(
+    val playSources: List<PlaySource>,
+    val issue: String? = null
 )
 
 @Singleton
@@ -20,6 +30,33 @@ class PlaybackUrlValidator @Inject constructor(
     @MediaOkHttpClient
     private val client: OkHttpClient
 ) {
+    private val validationClient = client.newBuilder()
+        .callTimeout(PLAYBACK_PREFLIGHT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .build()
+
+    suspend fun preflight(playSources: List<PlaySource>): PlaybackPreflight {
+        if (playSources.isEmpty()) return PlaybackPreflight(emptyList())
+
+        val prioritized = prioritizeKnownMediaLines(playSources)
+        if (prioritized.first().episodes.firstOrNull()?.hasExplicitMediaExtension() == true) {
+            return PlaybackPreflight(prioritized)
+        }
+
+        val validations = coroutineScope {
+            prioritized.map { source ->
+                async {
+                    val episode = source.episodes.firstOrNull()
+                    if (episode == null) {
+                        PlaybackValidation(false, "线路没有可播放剧集")
+                    } else {
+                        validate(episode.url)
+                    }
+                }
+            }.awaitAll()
+        }
+        return applyPlaybackValidations(prioritized, validations)
+    }
+
     suspend fun isPlayable(url: String): Boolean = withContext(Dispatchers.IO) {
         validate(url).playable
     }
@@ -32,7 +69,7 @@ class PlaybackUrlValidator @Inject constructor(
                 .header("Referer", refererFor(url))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            validationClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     val body = response.peekBody(512).string()
                     val reason = when {
@@ -45,26 +82,18 @@ class PlaybackUrlValidator @Inject constructor(
                     return@withContext PlaybackValidation(false, reason)
                 }
 
-                val normalized = url.substringBefore("?").lowercase()
-                if (!normalized.endsWith(".m3u8")) {
-                    return@withContext PlaybackValidation(true)
-                }
-
-                val contentType = response.header("Content-Type").orEmpty().lowercase()
-                if ("mpegurl" in contentType || "vnd.apple" in contentType) {
-                    return@withContext PlaybackValidation(true)
-                }
-
-                val looksLikeHls = response.peekBody(512).string().trimStart().startsWith("#EXTM3U")
-                if (looksLikeHls) {
-                    PlaybackValidation(true)
-                } else {
-                    PlaybackValidation(false, "返回内容不是 HLS 播放列表")
-                }
+                return@withContext evaluateSuccessfulPlaybackResponse(
+                    url = url,
+                    contentType = response.header("Content-Type"),
+                    bodyPrefix = response.peekBody(512).string()
+                )
             }
         }.getOrElse { error ->
-            Log.w("PlaybackUrlValidator", "Playback URL validation failed: ${url.safeUrlForLog()}", error)
-            PlaybackValidation(false, error.message ?: error::class.java.simpleName)
+            Log.w(
+                "PlaybackUrlValidator",
+                "Playback URL validation failed: ${url.safeUrlForLog()}, error=${error::class.java.simpleName}"
+            )
+            PlaybackValidation(false, "连接失败或响应超时")
         }
     }
 
@@ -78,6 +107,77 @@ class PlaybackUrlValidator @Inject constructor(
     }
 }
 
+internal fun evaluateSuccessfulPlaybackResponse(
+    url: String,
+    contentType: String?,
+    bodyPrefix: String
+): PlaybackValidation {
+    val normalizedContentType = contentType.orEmpty()
+        .substringBefore(";")
+        .trim()
+        .lowercase()
+    val normalizedBody = bodyPrefix.trimStart()
+        .removePrefix("\uFEFF")
+        .trimStart()
+        .lowercase()
+
+    val looksLikeHls =
+        "mpegurl" in normalizedContentType ||
+            "vnd.apple" in normalizedContentType ||
+            normalizedBody.startsWith("#extm3u")
+    if (looksLikeHls) return PlaybackValidation(true)
+
+    if (
+        normalizedContentType == "text/html" ||
+        normalizedContentType == "application/xhtml+xml" ||
+        normalizedBody.looksLikeHtmlDocument()
+    ) {
+        return PlaybackValidation(false, "返回内容是网页，不是媒体流")
+    }
+    if (
+        normalizedContentType.startsWith("text/") ||
+        "json" in normalizedContentType ||
+        "xml" in normalizedContentType
+    ) {
+        return PlaybackValidation(false, "返回内容类型不是媒体流")
+    }
+
+    val normalizedUrl = url.substringBefore("#").substringBefore("?").lowercase()
+    if (normalizedUrl.endsWith(".m3u8")) {
+        return PlaybackValidation(false, "返回内容不是 HLS 播放列表")
+    }
+
+    return PlaybackValidation(true)
+}
+
+internal fun prioritizeKnownMediaLines(playSources: List<PlaySource>): List<PlaySource> =
+    playSources.sortedByDescending { source ->
+        source.episodes.firstOrNull()?.hasExplicitMediaExtension() == true
+    }
+
+internal fun applyPlaybackValidations(
+    playSources: List<PlaySource>,
+    validations: List<PlaybackValidation>
+): PlaybackPreflight {
+    val failedCount = validations.count { validation -> !validation.playable }
+    val playableSources = playSources.filterIndexed { index, _ ->
+        validations.getOrNull(index)?.playable != false
+    }
+    val issue = when {
+        failedCount == 0 -> null
+        playableSources.isEmpty() -> "所有候选线路均未通过媒体预检"
+        else -> "已排除 $failedCount 条未通过媒体预检的线路"
+    }
+    return PlaybackPreflight(playSources = playableSources, issue = issue)
+}
+
+private fun String.looksLikeHtmlDocument(): Boolean =
+    startsWith("<!doctype html") ||
+        startsWith("<html") ||
+        startsWith("<head") ||
+        startsWith("<body")
+
+private const val PLAYBACK_PREFLIGHT_TIMEOUT_MS = 4_000L
 private fun String.safeUrlForLog(): String =
     toHttpUrlOrNull()?.let { parsed ->
         "${parsed.scheme}://${parsed.host}${parsed.encodedPath}"

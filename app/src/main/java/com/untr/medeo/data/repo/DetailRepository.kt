@@ -21,7 +21,8 @@ import kotlinx.coroutines.withContext
 @Singleton
 class DetailRepository @Inject constructor(
     private val factory: VodClientFactory,
-    private val sourceCatalog: SourceCatalog
+    private val sourceCatalog: SourceCatalog,
+    private val playbackUrlValidator: PlaybackUrlValidator
 ) {
     suspend fun detail(item: VodItem): VodDetail? {
         val source = sourceCatalog.sourceById(item.sourceId) ?: return null
@@ -48,18 +49,21 @@ class DetailRepository @Inject constructor(
                     .firstOrNull()
 
                 dto?.let {
-                    val parsedPlaySources = PlayUrlParser.parse(it.vodPlayFrom, it.vodPlayUrl)
+                    val parsedPlaySources = PlayUrlParser
+                        .parse(it.vodPlayFrom, it.vodPlayUrl)
                         .directMediaOnly()
+                    val preflight = playbackUrlValidator.preflight(parsedPlaySources)
                     VodDetail(
                         item = it.toDomain(source),
                         content = it.vodContent?.stripHtml()?.takeIf { content -> content.isNotBlank() },
                         actor = it.vodActor?.takeIf { actor -> actor.isNotBlank() },
                         director = it.vodDirector?.takeIf { director -> director.isNotBlank() },
-                        playSources = parsedPlaySources.also { parsedSources ->
-                            if (parsedSources.isEmpty()) {
+                        playSources = preflight.playSources.also { playableSources ->
+                            if (playableSources.isEmpty()) {
                                 Log.w("DetailRepository", "${source.name} has no playable media candidates")
                             }
-                        }
+                        },
+                        playbackIssue = preflight.issue
                     )
                 }
             }.getOrElse { error ->

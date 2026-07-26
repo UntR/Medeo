@@ -44,6 +44,7 @@ import coil3.compose.AsyncImage
 import com.untr.medeo.data.model.PlaySource
 import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.local.WatchProgress
+import com.untr.medeo.player.RESUME_PLAYBACK_INDEX
 import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
 import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
@@ -470,19 +471,13 @@ private fun ContinueWatchingButton(
     progress: WatchProgress,
     onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit
 ) {
-    val playSourceIndex = detail.playSources
-        .indexOfFirst { it.name == progress.playSourceName }
-        .takeIf { it >= 0 }
-        ?: 0
-    val episodeIndex = progress.episodeIndex.coerceAtLeast(0)
-
     Button(
         onClick = {
             onPlay(
                 detail.item.sourceId,
                 detail.item.vodId,
-                playSourceIndex,
-                episodeIndex
+                RESUME_PLAYBACK_INDEX,
+                RESUME_PLAYBACK_INDEX
             )
         },
         shape = RoundedCornerShape(22.dp),

@@ -39,8 +39,8 @@ android {
         applicationId = "com.untr.medeo"
         minSdk = 24
         targetSdk = 36
-        versionCode = 7
-        versionName = "v0.1.6"
+        versionCode = 8
+        versionName = "v0.1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

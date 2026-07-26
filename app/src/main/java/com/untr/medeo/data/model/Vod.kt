@@ -66,6 +66,14 @@ data class Episode(
         // and let the playback validator/player decide instead of dropping the whole source.
         return true
     }
+
+    internal fun hasExplicitMediaExtension(): Boolean {
+        val normalizedPath = url.trim()
+            .substringBefore("#")
+            .substringBefore("?")
+            .lowercase()
+        return normalizedPath.substringAfterLast(".") in directMediaExtensions
+    }
 }
 
 data class AggregatedResult(
