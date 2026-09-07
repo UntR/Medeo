@@ -2,6 +2,7 @@ package com.untr.medeo.data.repo
 
 import com.untr.medeo.data.local.ProgressDao
 import com.untr.medeo.data.local.WatchProgress
+import com.untr.medeo.data.model.Episode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
@@ -35,7 +36,10 @@ class ProgressRepositoryTest {
 
     @Test
     fun nextEpisodeIndexIfFinished_onlyReturnsNextEpisodeForFinishedProgress() {
-        assertEquals(3, progress(positionMs = 90_000L, durationMs = 100_000L).nextEpisodeIndexIfFinished())
+        val episodes = (1..4).map { Episode("第${it}集", "https://example.com/$it.m3u8") }
+        assertEquals(3, progress(positionMs = 90_000L, durationMs = 100_000L).nextEpisodeIndexIfFinished(episodes))
+        assertNull(progress(positionMs = 90_000L, durationMs = 100_000L).nextEpisodeIndexIfFinished())
+        assertNull(progress(positionMs = 90_000L, durationMs = 100_000L).nextEpisodeIndexIfFinished(episodes.take(3)))
         assertNull(progress(positionMs = 30_000L, durationMs = 100_000L).nextEpisodeIndexIfFinished())
     }
 

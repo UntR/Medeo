@@ -43,6 +43,16 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
+import com.untr.medeo.data.model.episodeSummary
+import com.untr.medeo.ui.components.EpisodePicker
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -165,22 +175,24 @@ private fun PlayerContent(
     val playSource = viewModel.uiState.playSource(viewModel.detailIndex, viewModel.playSourceIndex)
     val episode = viewModel.uiState.episode(viewModel.detailIndex, viewModel.playSourceIndex, viewModel.episodeIndex)
 
-    var playbackError by remember(episodeUrl) { mutableStateOf<String?>(null) }
-    var resumeApplied by remember(episodeUrl) { mutableStateOf(false) }
-    var isPlaying by remember(episodeUrl) { mutableStateOf(false) }
-    var playbackState by remember(episodeUrl) { mutableIntStateOf(Player.STATE_IDLE) }
-    var playbackSpeed by remember(episodeUrl) { mutableFloatStateOf(1f) }
-    var currentPosition by remember(episodeUrl) { mutableLongStateOf(0L) }
-    var duration by remember(episodeUrl) { mutableLongStateOf(0L) }
-    var bufferedPosition by remember(episodeUrl) { mutableLongStateOf(0L) }
+    val selectionKey = Triple(detail?.item?.key, viewModel.playSourceIndex, viewModel.episodeIndex)
+
+    var playbackError by remember(selectionKey, episodeUrl) { mutableStateOf<String?>(null) }
+    var resumeApplied by remember(selectionKey, episodeUrl) { mutableStateOf(false) }
+    var isPlaying by remember(selectionKey, episodeUrl) { mutableStateOf(false) }
+    var playbackState by remember(selectionKey, episodeUrl) { mutableIntStateOf(Player.STATE_IDLE) }
+    var playbackSpeed by remember(selectionKey, episodeUrl) { mutableFloatStateOf(1f) }
+    var currentPosition by remember(selectionKey, episodeUrl) { mutableLongStateOf(0L) }
+    var duration by remember(selectionKey, episodeUrl) { mutableLongStateOf(0L) }
+    var bufferedPosition by remember(selectionKey, episodeUrl) { mutableLongStateOf(0L) }
     var controlsVisible by remember { mutableStateOf(true) }
     var controlsLocked by remember { mutableStateOf(false) }
     var drawerVisible by remember { mutableStateOf(false) }
     var immersiveRequested by rememberSaveable { mutableStateOf(false) }
     var speedMenuExpanded by remember { mutableStateOf(false) }
     var gestureMessage by remember { mutableStateOf<String?>(null) }
-    var autoPlayNoticeVisible by remember(episodeUrl, autoPlayBlocked) { mutableStateOf(autoPlayBlocked) }
-    var playbackEndHandled by remember(episodeUrl) { mutableStateOf(false) }
+    var autoPlayNoticeVisible by remember(selectionKey, episodeUrl, autoPlayBlocked) { mutableStateOf(autoPlayBlocked) }
+    var playbackEndHandled by remember(selectionKey, episodeUrl) { mutableStateOf(false) }
     var longPressBoosting by remember { mutableStateOf(false) }
     var resizeMode by rememberSaveable { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var brightnessLevel by remember(activity) {
@@ -196,12 +208,13 @@ private fun PlayerContent(
     ).joinToString(" / ")
     val useFullscreen = immersiveRequested || (isLandscape && !windowClass.usesWideLayout)
     val useTheaterLayout = windowClass.usesWideLayout && !useFullscreen
+    val currentDetailIndex = viewModel.detailIndex
     val diagnosticSourceId = detail?.item?.sourceId.orEmpty()
     val diagnosticLineIndex = viewModel.playSourceIndex
     val diagnosticEpisodeIndex = viewModel.episodeIndex
-    val playbackStartedAt = remember(episodeUrl) { SystemClock.elapsedRealtime() }
+    val playbackStartedAt = remember(selectionKey, episodeUrl) { SystemClock.elapsedRealtime() }
 
-    val player = remember(episodeUrl, autoPlayBlocked) {
+    val player = remember(selectionKey, episodeUrl, autoPlayBlocked) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 30_000,
@@ -264,8 +277,14 @@ private fun PlayerContent(
         viewModel.logDiagnostic(event, fields)
     }
 
+    fun isCurrentSelection(): Boolean =
+        viewModel.detailIndex == currentDetailIndex &&
+            viewModel.playSourceIndex == diagnosticLineIndex &&
+            viewModel.episodeIndex == diagnosticEpisodeIndex
+
     fun saveProgress() {
-        viewModel.saveProgress(player.currentPosition, player.duration)
+        // A disposed player's callback must never write its position onto the new selection.
+        if (isCurrentSelection()) viewModel.saveProgress(player.currentPosition, player.duration)
     }
 
     fun selectAudioTrack(option: PlayerTrackOption?) {
@@ -321,7 +340,7 @@ private fun PlayerContent(
         playbackError = null
         player.stop()
         player.clearMediaItems()
-        player.setMediaItem(MediaItem.fromUri(episodeUrl))
+        player.setMediaItem(MediaItem.fromUri(episodeUrl), currentPosition.coerceAtLeast(0L))
         player.prepare()
         player.playWhenReady = true
         controlsVisible = true
@@ -347,7 +366,6 @@ private fun PlayerContent(
     fun switchToNextLine() {
         logPlaybackDiagnostic("playback_next_line")
         saveProgress()
-        playbackError = null
         viewModel.nextSourceOrLine()
         controlsVisible = true
     }
@@ -458,6 +476,7 @@ private fun PlayerContent(
                 )
                 if (
                     playbackStateValue == Player.STATE_ENDED &&
+                    isCurrentSelection() &&
                     !playbackEndHandled &&
                     viewModel.uiState.hasNextEpisode(
                         viewModel.detailIndex,
@@ -594,7 +613,7 @@ private fun PlayerContent(
                     viewModel.nextEpisode()
                 },
                 onRetry = ::retryPlayback,
-                onNextLine = ::switchToNextLine,
+                onNextLine = if (viewModel.hasAlternativeSource()) ::switchToNextLine else null,
                 onShowEpisodes = { drawerVisible = true },
                 onShowTracks = {
                     speedMenuExpanded = false
@@ -691,7 +710,7 @@ private fun PlayerContent(
                             viewModel.nextEpisode()
                         },
                         onRetry = ::retryPlayback,
-                        onNextLine = ::switchToNextLine,
+                        onNextLine = if (viewModel.hasAlternativeSource()) ::switchToNextLine else null,
                         onShowEpisodes = { drawerVisible = true },
                         onShowTracks = {
                             speedMenuExpanded = false
@@ -753,12 +772,10 @@ private fun PlayerContent(
                             onOpenDrawer = { drawerVisible = true },
                             onSelectDetail = { index ->
                                 saveProgress()
-                                playbackError = null
-                                viewModel.selectDetail(index, keepEpisode = true)
+                                viewModel.selectDetail(index)
                             },
                             onSelectPlaySource = { index ->
                                 saveProgress()
-                                playbackError = null
                                 viewModel.selectPlaySource(index)
                             },
                             onSelectEpisode = { index ->
@@ -816,7 +833,7 @@ private fun PlayerContent(
                         viewModel.nextEpisode()
                     },
                     onRetry = ::retryPlayback,
-                    onNextLine = ::switchToNextLine,
+                    onNextLine = if (viewModel.hasAlternativeSource()) ::switchToNextLine else null,
                     onShowEpisodes = { drawerVisible = true },
                     onShowTracks = {
                         speedMenuExpanded = false
@@ -868,12 +885,10 @@ private fun PlayerContent(
                         onOpenDrawer = { drawerVisible = true },
                         onSelectDetail = { index ->
                             saveProgress()
-                            playbackError = null
-                            viewModel.selectDetail(index, keepEpisode = true)
+                            viewModel.selectDetail(index)
                         },
                         onSelectPlaySource = { index ->
                             saveProgress()
-                            playbackError = null
                             viewModel.selectPlaySource(index)
                         },
                         onSelectEpisode = { index ->
@@ -897,19 +912,42 @@ private fun PlayerContent(
                 onDismiss = { drawerVisible = false },
                 onSelectDetail = { index ->
                     saveProgress()
-                    playbackError = null
-                    viewModel.selectDetail(index, keepEpisode = true)
+                    viewModel.selectDetail(index)
                 },
                 onSelectPlaySource = { index ->
                     saveProgress()
-                    playbackError = null
-                    viewModel.selectPlaySource(index, keepEpisode = true)
+                    viewModel.selectPlaySource(index)
                 },
                 onSelectEpisode = { index ->
                     saveProgress()
                     playbackError = null
                     viewModel.selectEpisode(index)
                 }
+            )
+        }
+
+        viewModel.pendingSelection?.let { pending ->
+            val target = viewModel.uiState.playSource(pending.detailIndex, pending.playSourceIndex)
+            AlertDialog(
+                onDismissRequest = viewModel::cancelPendingSelection,
+                title = { Text("请选择对应集数") },
+                text = {
+                    Column {
+                        Text("目标线路无法可靠匹配 ${episode?.name.orEmpty()}。取消将保留当前播放；手动选择其他集会从该集开头播放。")
+                        EpisodePicker(
+                            episodes = target?.episodes.orEmpty(),
+                            selectedIndex = null,
+                            onSelectEpisode = { index ->
+                                saveProgress()
+                                viewModel.confirmPendingEpisode(index)
+                                drawerVisible = false
+                            },
+                            modifier = Modifier.fillMaxWidth().height(360.dp)
+                        )
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = viewModel::cancelPendingSelection) { Text("取消") } }
             )
         }
 
@@ -958,7 +996,7 @@ private fun PlayerSurface(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onRetry: () -> Unit,
-    onNextLine: () -> Unit,
+    onNextLine: (() -> Unit)?,
     onShowEpisodes: () -> Unit,
     onShowTracks: () -> Unit,
     onToggleLock: () -> Unit,
@@ -1132,7 +1170,7 @@ private fun PlayerSurface(
                 error = error,
                 onRetry = onRetry,
                 onNextLine = onNextLine,
-                onNextEpisode = onNext,
+                onBack = onBack,
                 modifier = Modifier.align(Alignment.Center)
             )
         }
@@ -1442,7 +1480,7 @@ private fun TrackSelectionOptionRow(
 }
 
 @Composable
-private fun CompactPlayerProgressBar(
+internal fun CompactPlayerProgressBar(
     currentPosition: Long,
     duration: Long,
     bufferedPercent: Int,
@@ -1460,6 +1498,15 @@ private fun CompactPlayerProgressBar(
     Canvas(
         modifier = modifier
             .height(20.dp)
+            .semantics {
+                contentDescription = "播放进度"
+                stateDescription = "${formatPlaybackTime(currentPosition)} / ${formatPlaybackTime(duration)}"
+                progressBarRangeInfo = ProgressBarRangeInfo(progressFraction, 0f..1f)
+                if (enabled) setProgress { fraction ->
+                    onSeekTo((duration * fraction.coerceIn(0f, 1f)).toLong())
+                    true
+                }
+            }
             .pointerInput(duration, enabled) {
                 if (!enabled) return@pointerInput
                 awaitEachGesture {
@@ -1518,12 +1565,13 @@ private fun CompactPlayerProgressBar(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PlaybackErrorPanel(
+internal fun PlaybackErrorPanel(
     error: String,
     onRetry: () -> Unit,
-    onNextLine: () -> Unit,
-    onNextEpisode: () -> Unit,
+    onNextLine: (() -> Unit)?,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -1535,7 +1583,7 @@ private fun PlaybackErrorPanel(
             .widthIn(max = 420.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.verticalScroll(rememberScrollState()).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
@@ -1549,10 +1597,10 @@ private fun PlaybackErrorPanel(
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onRetry) { Text("重试") }
-                Button(onClick = onNextLine) { Text("下一源/线路") }
-                Button(onClick = onNextEpisode) { Text("下一集") }
+                if (onNextLine != null) Button(onClick = onNextLine) { Text("换源/线路") }
+                TextButton(onClick = onBack) { Text("返回") }
             }
         }
     }
@@ -1623,7 +1671,7 @@ private fun PlayerQueuePanel(
                 items = details.mapIndexed { index, sourceDetail ->
                     InstantTabItem(
                         id = "player-source-$index-${sourceDetail.item.key}",
-                        label = sourceDetail.displaySourceLabel()
+                        label = "${sourceDetail.item.sourceName} · ${sourceDetail.episodeSummary(if (index == selectedDetailIndex) selectedPlaySourceIndex else null)}"
                     )
                 },
                 selectedIndex = selectedDetailIndex,
@@ -1642,22 +1690,13 @@ private fun PlayerQueuePanel(
         )
 
         val currentSource = detail.playSources.getOrNull(selectedPlaySourceIndex)
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            itemsIndexed(currentSource?.episodes.orEmpty()) { index, episode ->
-                EpisodeListRow(
-                    episode = episode,
-                    index = index,
-                    selected = index == selectedEpisodeIndex,
-                    onClick = { onSelectEpisode(index) }
-                )
-            }
-        }
+        Text(detail.episodeSummary(selectedPlaySourceIndex), modifier = Modifier.padding(horizontal = 16.dp))
+        EpisodePicker(
+            episodes = currentSource?.episodes.orEmpty(),
+            selectedIndex = selectedEpisodeIndex,
+            onSelectEpisode = onSelectEpisode,
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)
+        )
     }
 }
 
@@ -1725,7 +1764,7 @@ private fun EpisodeDrawer(
                         items = details.mapIndexed { index, sourceDetail ->
                             InstantTabItem(
                                 id = "drawer-source-$index-${sourceDetail.item.key}",
-                                label = sourceDetail.displaySourceLabel()
+                                label = "${sourceDetail.item.sourceName} · ${sourceDetail.episodeSummary(if (index == selectedDetailIndex) selectedPlaySourceIndex else null)}"
                             )
                         },
                         selectedIndex = selectedDetailIndex,
@@ -1747,22 +1786,13 @@ private fun EpisodeDrawer(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 val currentSource = detail.playSources.getOrNull(selectedPlaySourceIndex)
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp)
-                ) {
-                    itemsIndexed(currentSource?.episodes.orEmpty()) { index, episode ->
-                        EpisodeListRow(
-                            episode = episode,
-                            index = index,
-                            selected = index == selectedEpisodeIndex,
-                            onClick = { onSelectEpisode(index) }
-                        )
-                    }
-                }
+                Text(detail.episodeSummary(selectedPlaySourceIndex), modifier = Modifier.padding(horizontal = 16.dp))
+                EpisodePicker(
+                    episodes = currentSource?.episodes.orEmpty(),
+                    selectedIndex = selectedEpisodeIndex,
+                    onSelectEpisode = onSelectEpisode,
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)
+                )
             }
         }
     }
@@ -2221,15 +2251,6 @@ private fun VodDetail.displayPlaySourceLabel(index: Int): String {
         lineName.isTechnicalLineName() -> sourceName
         playSources.size <= 1 -> sourceName
         else -> lineName
-    }
-}
-
-private fun VodDetail.displaySourceLabel(): String {
-    val episodeCount = playSources.sumOf { it.episodes.size }
-    return if (episodeCount > 0) {
-        "${item.sourceName} $episodeCount 集"
-    } else {
-        item.sourceName
     }
 }
 

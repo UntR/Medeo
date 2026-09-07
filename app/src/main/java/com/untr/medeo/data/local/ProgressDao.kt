@@ -74,6 +74,16 @@ abstract class ProgressDao {
         }
     }
 
+    @Transaction
+    open suspend fun restoreIfAbsent(progress: WatchProgress) {
+        val existing = findByIdentity(
+            progress.contentKey,
+            progress.preferredSourceId,
+            progress.preferredVodId
+        )
+        if (existing == null) upsert(progress)
+    }
+
     @Query("DELETE FROM watch_progress WHERE contentKey = :contentKey")
     abstract suspend fun deleteByContentKey(contentKey: String)
 

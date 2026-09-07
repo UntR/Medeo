@@ -6,7 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -148,6 +149,8 @@ private fun MedeoAppRoot(
                     HomeScreen(
                         windowClass = windowClass,
                         onOpenSearch = { query -> navController.navigate(Routes.search(query)) },
+                        onOpenHistory = { navController.navigate(Routes.HISTORY) },
+                        onContinueRecent = { item -> navController.navigate(Routes.resumePlayer(item.sourceId, item.vodId)) },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
@@ -180,19 +183,19 @@ private fun MedeoAppRoot(
                         onOpenDetail = { item ->
                             navController.navigate(Routes.detail(item.sourceId, item.vodId))
                         },
-                        onContinueRecent = { item, nextEpisodeIndex ->
-                            val route = if (nextEpisodeIndex != null) {
-                                Routes.player(
-                                    sourceId = item.sourceId,
-                                    vodId = item.vodId,
-                                    playSourceIndex = RESUME_PLAYBACK_INDEX,
-                                    episodeIndex = nextEpisodeIndex
-                                )
-                            } else {
-                                Routes.resumePlayer(item.sourceId, item.vodId)
-                            }
-                            navController.navigate(route)
+                        onContinueRecent = { item ->
+                            navController.navigate(Routes.resumePlayer(item.sourceId, item.vodId))
                         }
+                    )
+                }
+                composable(Routes.HISTORY) {
+                    FavoritesScreen(
+                        windowClass = windowClass,
+                        initiallyShowHistory = true,
+                        onBack = { navController.popBackStack() },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                        onOpenDetail = { item -> navController.navigate(Routes.detail(item.sourceId, item.vodId)) },
+                        onContinueRecent = { item -> navController.navigate(Routes.resumePlayer(item.sourceId, item.vodId)) }
                     )
                 }
                 composable(Routes.SETTINGS) {
@@ -314,7 +317,7 @@ private fun MedeoBottomBar(
                     modifier = Modifier
                         .width(86.dp)
                         .clip(RoundedCornerShape(28.dp))
-                        .clickable { onDestinationClick(destination) }
+                        .selectable(selected = selected, role = Role.Tab) { onDestinationClick(destination) }
                         .padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {

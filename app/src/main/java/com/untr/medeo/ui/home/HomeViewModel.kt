@@ -13,6 +13,12 @@ import com.untr.medeo.data.model.VodItem
 import com.untr.medeo.data.model.bestHotListMatchFor
 import com.untr.medeo.data.model.defaultCategoryFilters
 import com.untr.medeo.data.model.defaultTypeFilters
+import com.untr.medeo.data.local.WatchProgress
+import com.untr.medeo.data.repo.ProgressRepository
+import com.untr.medeo.data.repo.ContentRecoveryRepository
+import com.untr.medeo.data.repo.ContentRecoveryResult
+import com.untr.medeo.data.repo.isFinished
+import com.untr.medeo.data.repo.toVodItem
 import com.untr.medeo.data.local.SettingsStore
 import com.untr.medeo.data.net.NetworkMonitor
 import com.untr.medeo.data.repo.DetailSelectionStore
@@ -42,6 +48,8 @@ data class HomeUiState(
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
+    private val progressRepository: ProgressRepository,
+    private val recoveryRepository: ContentRecoveryRepository,
     private val hotListRepository: HotListRepository,
     private val searchRepository: SearchRepository,
     private val detailSelectionStore: DetailSelectionStore,
@@ -54,14 +62,45 @@ class HomeViewModel @Inject constructor(
 
     private val _openDetailEvents = MutableSharedFlow<VodItem>(extraBufferCapacity = 1)
     val openDetailEvents = _openDetailEvents.asSharedFlow()
+    var recentProgress by mutableStateOf<WatchProgress?>(null)
+        private set
+    var recoveringRecent by mutableStateOf(false)
+        private set
+    private val _continueRecentEvents = MutableSharedFlow<VodItem>(extraBufferCapacity = 1)
+    val continueRecentEvents = _continueRecentEvents.asSharedFlow()
     private var refreshJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            progressRepository.observeAll().collect { recentProgress = it.maxByOrNull { progress -> progress.updatedAt } }
+        }
         viewModelScope.launch {
             loadHotList(
                 contentType = settingsStore.homeContentType(),
                 restoreCachedSelection = true
             )
+        }
+    }
+
+    fun continueRecent() {
+        val progress = recentProgress ?: return
+        if (recoveringRecent) return
+        viewModelScope.launch {
+            recoveringRecent = true
+            try {
+                when (val result = recoveryRepository.recover(progress.toVodItem())) {
+                    is ContentRecoveryResult.Success -> {
+                        detailSelectionStore.remember(result.candidates)
+                        if (progress.isFinished()) _openDetailEvents.emit(result.primary)
+                        else _continueRecentEvents.emit(result.primary)
+                    }
+                    ContentRecoveryResult.NoEnabledSources -> uiState = uiState.copy(lookupMessage = "尚未启用数据源", requiresSourceSetup = true)
+                    ContentRecoveryResult.NetworkUnavailable -> uiState = uiState.copy(lookupMessage = "当前无网络连接，观看记录已保留", requiresSourceSetup = false)
+                    ContentRecoveryResult.NotFound -> uiState = uiState.copy(lookupMessage = "暂未找到对应播放源，可再次点击重试，观看记录已保留", requiresSourceSetup = false)
+                }
+            } finally {
+                recoveringRecent = false
+            }
         }
     }
 

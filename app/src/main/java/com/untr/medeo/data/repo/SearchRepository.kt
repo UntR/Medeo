@@ -100,12 +100,15 @@ class SearchRepository @Inject constructor(
             return@channelFlow
         }
 
+        val pendingIds = requestSources.mapTo(hashSetOf()) { it.id }
+        failedSourceIds.removeAll(pendingIds)
+        val unchangedSourceCount = sources.size - requestSources.size
         val initialResults = aggregate(items, query)
         val initialHasMore = hasMore(pageStates, sources)
         send(
             SearchProgress(
-                completedSources = 0,
-                totalSources = requestSources.size,
+                completedSources = unchangedSourceCount,
+                totalSources = sources.size,
                 failedSources = failedSourceIds.size,
                 results = initialResults,
                 loading = !loadMore,
@@ -155,8 +158,8 @@ class SearchRepository @Inject constructor(
                 }
                 send(
                     SearchProgress(
-                        completedSources = update.completedSources,
-                        totalSources = requestSources.size,
+                        completedSources = unchangedSourceCount + update.completedSources,
+                        totalSources = sources.size,
                         failedSources = update.failedSources,
                         results = aggregate(update.items, query),
                         loading = !loadMore && update.completedSources < requestSources.size,

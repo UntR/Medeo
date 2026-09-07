@@ -5,6 +5,9 @@ import com.untr.medeo.data.local.WatchProgress
 import com.untr.medeo.data.local.preferredKey
 import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.model.VodItem
+import com.untr.medeo.data.model.Episode
+import com.untr.medeo.data.model.adjacentEpisodeIndex
+import com.untr.medeo.data.model.matchingEpisodeIndex
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +42,10 @@ class ProgressRepository @Inject constructor(
 
     suspend fun clearAll() {
         progressDao.deleteAll()
+    }
+
+    suspend fun restore(progress: WatchProgress) {
+        progressDao.restoreIfAbsent(progress)
     }
 
     suspend fun save(
@@ -93,7 +100,7 @@ class ProgressRepository @Inject constructor(
 
 fun WatchProgress.toVodItem(): VodItem {
     val progressText = if (isFinished()) {
-        "看完"
+        "本集接近看完"
     } else {
         positionMs.formatPlaybackPosition()
     }
@@ -113,8 +120,11 @@ fun WatchProgress.toVodItem(): VodItem {
 fun WatchProgress.isFinished(threshold: Double = WATCH_COMPLETION_THRESHOLD): Boolean =
     durationMs > 0L && positionMs.toDouble() / durationMs.toDouble() >= threshold
 
-fun WatchProgress.nextEpisodeIndexIfFinished(): Int? =
-    if (isFinished()) episodeIndex + 1 else null
+fun WatchProgress.nextEpisodeIndexIfFinished(episodes: List<Episode> = emptyList()): Int? {
+    if (!isFinished()) return null
+    val currentIndex = matchingEpisodeIndex(episodes, episodeName) ?: return null
+    return adjacentEpisodeIndex(episodes, currentIndex, 1)
+}
 
 private fun Long.formatPlaybackPosition(): String {
     val totalSeconds = (this / 1000).coerceAtLeast(0)

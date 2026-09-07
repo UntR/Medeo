@@ -284,11 +284,7 @@ private fun SearchProgress(state: SearchUiState) {
     }
     if (state.totalSources > 0) {
         Text(
-            text = if (state.loadingMore) {
-                "加载更多：${state.completedSources}/${state.totalSources} 源已返回"
-            } else {
-                "${state.completedSources}/${state.totalSources} 源已返回"
-            },
+            text = state.sourceStatusLabel(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)

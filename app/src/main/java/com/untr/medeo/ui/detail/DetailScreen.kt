@@ -2,6 +2,8 @@ package com.untr.medeo.ui.detail
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,10 +26,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -44,7 +49,9 @@ import coil3.compose.AsyncImage
 import com.untr.medeo.data.model.PlaySource
 import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.local.WatchProgress
-import com.untr.medeo.player.RESUME_PLAYBACK_INDEX
+import com.untr.medeo.data.model.matchingEpisodeIndex
+import com.untr.medeo.data.model.episodeSummary
+import com.untr.medeo.ui.components.EpisodePicker
 import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
 import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
@@ -88,7 +95,7 @@ fun DetailScreen(
 }
 
 @Composable
-private fun DetailContent(
+internal fun DetailContent(
     details: List<VodDetail>,
     favoriteKeys: Set<String>,
     progressByKey: Map<String, WatchProgress>,
@@ -99,7 +106,11 @@ private fun DetailContent(
     modifier: Modifier = Modifier
 ) {
     var selectedDetailIndex by remember(details) { mutableIntStateOf(0) }
-    var selectedLineIndex by remember(selectedDetailIndex) { mutableIntStateOf(0) }
+    val selectedDetail = details.getOrNull(selectedDetailIndex)
+    val storedProgress = selectedDetail?.let { progressByKey[it.item.contentKey] ?: progressByKey[it.item.key] }
+    var selectedLineIndex by remember(selectedDetailIndex, storedProgress?.playSourceName) {
+        mutableIntStateOf(selectedDetail?.playSources?.indexOfFirst { it.name == storedProgress?.playSourceName }?.takeIf { it >= 0 } ?: 0)
+    }
     val detail = details.getOrNull(selectedDetailIndex) ?: return
     val playSource = detail.playSources.getOrNull(selectedLineIndex)
 
@@ -223,27 +234,14 @@ private fun PhoneDetailList(
         }
 
         item {
-            DetailHeader(detail)
+            ContinueWatchingButton(detail, selectedLineIndex, progress, onPlay)
         }
-
-        progress?.let {
-            item {
-                ContinueWatchingButton(
-                    detail = detail,
-                    progress = it,
-                    onPlay = onPlay
-                )
-            }
-        }
+        item { DetailHeader(detail) }
 
         detail.playbackIssue?.let { issue ->
             item {
                 IssueCard(issue)
             }
-        }
-
-        item {
-            SummaryCard(detail.content.orEmpty().ifBlank { "暂无简介" })
         }
 
         if (detail.playSources.isNotEmpty()) {
@@ -252,6 +250,7 @@ private fun PhoneDetailList(
                     SourceTabs(
                         details = details,
                         selectedIndex = selectedDetailIndex,
+                        selectedLineIndex = selectedLineIndex,
                         onSelected = onSelectDetail
                     )
                 }
@@ -268,19 +267,13 @@ private fun PhoneDetailList(
             }
 
             playSource?.let { source ->
-                itemsIndexed(source.episodes) { episodeIndex, episode ->
-                    EpisodeListRow(
-                        episode = episode,
-                        index = episodeIndex,
-                        selected = false,
-                        onClick = {
-                            onPlay(
-                                detail.item.sourceId,
-                                detail.item.vodId,
-                                selectedLineIndex,
-                                episodeIndex
-                            )
-                        }
+                item {
+                    Text(detail.episodeSummary(selectedLineIndex), style = MaterialTheme.typography.labelLarge)
+                    EpisodePicker(
+                        episodes = source.episodes,
+                        selectedIndex = progress?.let { matchingEpisodeIndex(source.episodes, it.episodeName) },
+                        onSelectEpisode = { onPlay(detail.item.sourceId, detail.item.vodId, selectedLineIndex, it) },
+                        modifier = Modifier.fillMaxWidth().height(480.dp)
                     )
                 }
             }
@@ -289,6 +282,8 @@ private fun PhoneDetailList(
                 Text("暂无可播放线路")
             }
         }
+        item { SummaryCard(detail.content.orEmpty().ifBlank { "暂无简介" }) }
+
     }
 }
 
@@ -339,18 +334,8 @@ private fun TabletDetailContent(
                             onToggleFavorite = onToggleFavorite
                         )
                     }
-                    item {
-                        DetailHeader(detail)
-                    }
-                    progress?.let {
-                        item {
-                            ContinueWatchingButton(
-                                detail = detail,
-                                progress = it,
-                                onPlay = onPlay
-                            )
-                        }
-                    }
+                    item { ContinueWatchingButton(detail, selectedLineIndex, progress, onPlay) }
+                    item { DetailHeader(detail) }
                     detail.playbackIssue?.let { issue ->
                         item {
                             IssueCard(issue)
@@ -374,6 +359,7 @@ private fun TabletDetailContent(
                                 SourceTabs(
                                     details = details,
                                     selectedIndex = selectedDetailIndex,
+                                    selectedLineIndex = selectedLineIndex,
                                     onSelected = onSelectDetail
                                 )
                             }
@@ -390,19 +376,13 @@ private fun TabletDetailContent(
                         }
 
                         playSource?.let { source ->
-                            itemsIndexed(source.episodes) { episodeIndex, episode ->
-                                EpisodeListRow(
-                                    episode = episode,
-                                    index = episodeIndex,
-                                    selected = false,
-                                    onClick = {
-                                        onPlay(
-                                            detail.item.sourceId,
-                                            detail.item.vodId,
-                                            selectedLineIndex,
-                                            episodeIndex
-                                        )
-                                    }
+                            item {
+                                Text(detail.episodeSummary(selectedLineIndex), style = MaterialTheme.typography.labelLarge)
+                                EpisodePicker(
+                                    episodes = source.episodes,
+                                    selectedIndex = progress?.let { matchingEpisodeIndex(source.episodes, it.episodeName) },
+                                    onSelectEpisode = { onPlay(detail.item.sourceId, detail.item.vodId, selectedLineIndex, it) },
+                                    modifier = Modifier.fillMaxWidth().height(480.dp)
                                 )
                             }
                         }
@@ -468,32 +448,23 @@ private fun DetailToolbar(
 @Composable
 private fun ContinueWatchingButton(
     detail: VodDetail,
-    progress: WatchProgress,
+    selectedLineIndex: Int,
+    progress: WatchProgress?,
     onPlay: (sourceId: String, vodId: Long, playSourceIndex: Int, episodeIndex: Int) -> Unit
 ) {
-    Button(
-        onClick = {
-            onPlay(
-                detail.item.sourceId,
-                detail.item.vodId,
-                RESUME_PLAYBACK_INDEX,
-                RESUME_PLAYBACK_INDEX
-            )
-        },
-        shape = RoundedCornerShape(22.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text("继续观看 ${progress.episodeName} ${formatPosition(progress.positionMs)}")
+    val action = detailPlaybackAction(detail, selectedLineIndex, progress)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Button(
+            onClick = { action.episodeIndex?.let { onPlay(detail.item.sourceId, detail.item.vodId, selectedLineIndex, it) } },
+            enabled = action.episodeIndex != null,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(action.label) }
+        action.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
 
-private fun formatPosition(positionMs: Long): String {
-    val totalSeconds = (positionMs / 1000).coerceAtLeast(0)
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%02d:%02d".format(minutes, seconds)
-}
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailHeader(detail: VodDetail) {
     Surface(
@@ -530,7 +501,7 @@ private fun DetailHeader(detail: VodDetail) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOfNotNull(detail.item.year, detail.item.area, detail.item.typeName)
                         .take(3)
                         .forEach { value -> MetaPill(value) }
@@ -565,7 +536,8 @@ private fun MetaPill(text: String) {
 }
 
 @Composable
-private fun SummaryCard(text: String) {
+internal fun SummaryCard(text: String) {
+    var expanded by rememberSaveable(text) { mutableStateOf(false) }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
@@ -583,10 +555,11 @@ private fun SummaryCard(text: String) {
                 text = text,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 5,
+                maxLines = if (expanded) Int.MAX_VALUE else 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 8.dp)
             )
+            TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起简介" else "展开简介") }
         }
     }
 }
@@ -624,6 +597,7 @@ private fun DetailLine(label: String, value: String?) {
 private fun SourceTabs(
     details: List<VodDetail>,
     selectedIndex: Int,
+    selectedLineIndex: Int,
     onSelected: (Int) -> Unit
 ) {
     Column(
@@ -637,11 +611,11 @@ private fun SourceTabs(
         )
         InstantTabRow(
             items = details.mapIndexed { index, detail ->
-                val episodeCount = detail.playSources.sumOf { it.episodes.size }
+                val summary = detail.episodeSummary(if (index == selectedIndex) selectedLineIndex else null)
                 val issueMark = if (detail.playbackIssue == null) "" else " !"
                 InstantTabItem(
                     id = "${detail.item.sourceId}-${detail.item.vodId}-$index",
-                    label = "${detail.item.sourceName}${issueMark} ${episodeCount}集"
+                    label = "${detail.item.sourceName}${issueMark} · $summary"
                 )
             },
             selectedIndex = selectedIndex,

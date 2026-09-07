@@ -12,7 +12,7 @@ import com.untr.medeo.data.repo.DetailSelectionStore
 import com.untr.medeo.data.repo.FavoriteRepository
 import com.untr.medeo.data.repo.ProgressRepository
 import com.untr.medeo.data.repo.isFinished
-import com.untr.medeo.data.repo.nextEpisodeIndexIfFinished
+import com.untr.medeo.data.local.WatchProgress
 import com.untr.medeo.data.repo.toVodItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -31,21 +31,19 @@ data class FavoritesUiState(
     val failedFavorite: VodItem? = null
 )
 
-data class RecentWatchItem(
-    val contentKey: String,
-    val item: VodItem,
-    val finished: Boolean,
-    val nextEpisodeIndex: Int?
-) {
-    val actionLabel: String get() = if (finished) "看下一集" else "继续播放"
+data class RecentWatchItem(val progress: WatchProgress) {
+    val contentKey: String get() = progress.contentKey
+    val item: VodItem get() = progress.toVodItem()
+    val finished: Boolean get() = progress.isFinished()
+    val actionLabel: String get() = if (finished) "查看选集" else "继续观看"
 }
+
+internal fun filterWatchHistory(items: List<RecentWatchItem>, query: String): List<RecentWatchItem> =
+    items.filter { it.item.name.contains(query.trim(), ignoreCase = true) }
 
 sealed interface FavoritesNavigationEvent {
     data class OpenDetail(val item: VodItem) : FavoritesNavigationEvent
-    data class ContinueRecent(
-        val item: VodItem,
-        val nextEpisodeIndex: Int?
-    ) : FavoritesNavigationEvent
+    data class ContinueRecent(val item: VodItem) : FavoritesNavigationEvent
 }
 
 @HiltViewModel
@@ -74,15 +72,7 @@ class FavoritesViewModel @Inject constructor(
                     items = favorites.map { it.toVodItem() },
                     recentItems = progresses
                         .sortedByDescending { it.updatedAt }
-                        .take(RECENT_WATCH_LIMIT)
-                        .map { progress ->
-                            RecentWatchItem(
-                                contentKey = progress.contentKey,
-                                item = progress.toVodItem(),
-                                finished = progress.isFinished(),
-                                nextEpisodeIndex = progress.nextEpisodeIndexIfFinished()
-                            )
-                        }
+                        .map(::RecentWatchItem)
                 )
             }.collect {}
         }
@@ -102,13 +92,22 @@ class FavoritesViewModel @Inject constructor(
 
     fun continueRecent(item: RecentWatchItem) {
         recover(item.item) { recovered ->
-            FavoritesNavigationEvent.ContinueRecent(recovered, item.nextEpisodeIndex)
+            if (item.finished) FavoritesNavigationEvent.OpenDetail(recovered)
+            else FavoritesNavigationEvent.ContinueRecent(recovered)
         }
+    }
+
+    private val _deletedEvents = MutableSharedFlow<RecentWatchItem>(extraBufferCapacity = 1)
+    val deletedEvents = _deletedEvents.asSharedFlow()
+
+    fun undoDelete(item: RecentWatchItem) {
+        viewModelScope.launch { progressRepository.restore(item.progress) }
     }
 
     fun deleteRecent(item: RecentWatchItem) {
         viewModelScope.launch {
             progressRepository.delete(item.contentKey)
+            _deletedEvents.emit(item)
         }
     }
 
@@ -173,7 +172,4 @@ class FavoritesViewModel @Inject constructor(
         }
     }
 
-    private companion object {
-        const val RECENT_WATCH_LIMIT = 10
-    }
 }

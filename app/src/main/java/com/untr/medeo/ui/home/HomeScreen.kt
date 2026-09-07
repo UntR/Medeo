@@ -34,6 +34,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -48,6 +50,8 @@ import com.untr.medeo.data.model.HotContentType
 import com.untr.medeo.data.model.HotFilter
 import com.untr.medeo.data.model.HotListItem
 import com.untr.medeo.data.model.VodItem
+import com.untr.medeo.data.local.WatchProgress
+import com.untr.medeo.data.repo.isFinished
 import com.untr.medeo.ui.adaptive.AdaptiveWidthBox
 import com.untr.medeo.ui.adaptive.MedeoWindowClass
 import com.untr.medeo.ui.adaptive.rememberMedeoWindowClass
@@ -63,6 +67,8 @@ fun HomeScreen(
     onOpenSearch: (String?) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDetail: (VodItem) -> Unit,
+    onContinueRecent: (VodItem) -> Unit,
+    onOpenHistory: () -> Unit,
     modifier: Modifier = Modifier,
     windowClass: MedeoWindowClass = rememberMedeoWindowClass(),
     viewModel: HomeViewModel = hiltViewModel()
@@ -75,9 +81,19 @@ fun HomeScreen(
         }
     }
 
-    if (windowClass == MedeoWindowClass.Compact) {
+    LaunchedEffect(viewModel) {
+        viewModel.continueRecentEvents.collect(onContinueRecent)
+    }
+    val recentContent: @Composable () -> Unit = {
+        RecentWatchingCard(viewModel.recentProgress, viewModel.recoveringRecent, viewModel::continueRecent, onOpenHistory)
+    }
+
+    if (windowClass == MedeoWindowClass.Compact ||
+        LocalConfiguration.current.screenHeightDp < 600 * LocalDensity.current.fontScale
+    ) {
         PhoneHomeContent(
             state = state,
+            recentContent = recentContent,
             onOpenSearch = onOpenSearch,
             onOpenSettings = onOpenSettings,
             onSelectContentType = viewModel::selectContentType,
@@ -90,6 +106,7 @@ fun HomeScreen(
     } else {
         TabletHomeContent(
             state = state,
+            recentContent = recentContent,
             onOpenSearch = onOpenSearch,
             onOpenSettings = onOpenSettings,
             onSelectContentType = viewModel::selectContentType,
@@ -106,6 +123,7 @@ fun HomeScreen(
 @Composable
 private fun PhoneHomeContent(
     state: HomeUiState,
+    recentContent: @Composable () -> Unit,
     onOpenSearch: (String?) -> Unit,
     onOpenSettings: () -> Unit,
     onSelectContentType: (HotContentType) -> Unit,
@@ -115,54 +133,32 @@ private fun PhoneHomeContent(
     onOpenItem: (HotListItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+    LazyColumn(
+        modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        HomeHeader(onOpenSearch = { onOpenSearch(null) })
-
-        HotContentTabs(
-            selectedContentType = state.contentType,
-            onSelected = onSelectContentType
-        )
-
-        HotCategoryTabs(
-            filters = state.categoryFilters,
-            selectedCategory = state.selectedCategory,
-            onSelected = onSelectCategory
-        )
-
-        HotTypeRow(
-            filters = state.typeFilters,
-            selectedType = state.selectedType,
-            onSelected = onSelectType
-        )
-
+        item { HomeHeader(onOpenSearch = { onOpenSearch(null) }) }
+        item { recentContent() }
+        item { HotContentTabs(state.contentType, onSelectContentType) }
+        item { HotCategoryTabs(state.categoryFilters, state.selectedCategory, onSelectCategory) }
+        item { HotTypeRow(state.typeFilters, state.selectedType, onSelectType) }
         state.lookupMessage?.let { message ->
-            LookupMessage(
-                message = message,
-                manualSearchQuery = state.manualSearchQuery,
-                onOpenSearch = onOpenSearch,
-                showSettingsAction = state.requiresSourceSetup,
-                onOpenSettings = onOpenSettings,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-            )
+            item {
+                LookupMessage(message, state.manualSearchQuery, onOpenSearch, state.requiresSourceSetup,
+                    onOpenSettings, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            }
         }
-
         when {
-            state.loading -> LoadingState("正在加载热榜")
-            state.error != null -> MessageState(
-                message = state.error,
-                actionLabel = "重新加载",
-                onAction = onRefresh
-            )
-            else -> HotRankedList(
-                items = state.items,
-                resolvingItemId = state.resolvingItemId,
-                onOpenItem = onOpenItem,
-                modifier = Modifier.fillMaxSize()
-            )
+            state.loading -> item { LoadingState("正在加载热榜", Modifier.heightIn(min = 160.dp)) }
+            state.error != null -> item {
+                MessageState(state.error, Modifier.heightIn(min = 160.dp), "重新加载", onRefresh)
+            }
+            else -> itemsIndexed(state.items, key = { _, item -> item.id }) { index, item ->
+                Box(Modifier.padding(horizontal = 16.dp)) {
+                    HotListRow(item.copy(rank = index + 1), state.resolvingItemId == item.id, { onOpenItem(item) })
+                }
+            }
         }
     }
 }
@@ -170,6 +166,7 @@ private fun PhoneHomeContent(
 @Composable
 private fun TabletHomeContent(
     state: HomeUiState,
+    recentContent: @Composable () -> Unit,
     onOpenSearch: (String?) -> Unit,
     onOpenSettings: () -> Unit,
     onSelectContentType: (HotContentType) -> Unit,
@@ -193,6 +190,7 @@ private fun TabletHomeContent(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 HomeHeader(onOpenSearch = { onOpenSearch(null) })
+                recentContent()
                 HotContentTabs(
                     selectedContentType = state.contentType,
                     onSelected = onSelectContentType
@@ -251,6 +249,32 @@ private fun TabletHomeContent(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun RecentWatchingCard(
+    progress: WatchProgress?,
+    loading: Boolean,
+    onContinue: () -> Unit,
+    onOpenHistory: () -> Unit
+) {
+    if (progress == null) return
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.primaryContainer
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+            Text(progress.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(progress.episodeName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = onContinue, enabled = !loading) {
+                    Text(if (loading) "正在恢复…" else if (progress.isFinished()) "查看选集" else "继续观看")
+                }
+                TextButton(onClick = onOpenHistory) { Text("全部记录") }
             }
         }
     }

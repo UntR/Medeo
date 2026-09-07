@@ -17,7 +17,8 @@ import com.untr.medeo.data.model.Episode
 import com.untr.medeo.data.model.PlaySource
 import com.untr.medeo.data.model.VodDetail
 import com.untr.medeo.data.model.VodItem
-import com.untr.medeo.data.model.normalize
+import com.untr.medeo.data.model.matchingEpisodeIndex
+import com.untr.medeo.data.model.adjacentEpisodeIndex
 import com.untr.medeo.data.net.NetworkMonitor
 import com.untr.medeo.data.net.NetworkSnapshot
 import com.untr.medeo.data.repo.DetailRepository
@@ -42,7 +43,7 @@ data class PlayerUiState(
         playSource(detailIndex, playSourceIndex)?.episodes?.getOrNull(episodeIndex)
     fun hasNextEpisode(detailIndex: Int, playSourceIndex: Int, episodeIndex: Int): Boolean {
         val source = playSource(detailIndex, playSourceIndex) ?: return false
-        return episodeIndex < source.episodes.lastIndex
+        return adjacentEpisodeIndex(source.episodes, episodeIndex, 1) != null
     }
 }
 
@@ -104,30 +105,12 @@ internal fun resolveProgressEpisodeIndex(
     progress: WatchProgress
 ): Int {
     if (episodes.isEmpty()) return 0
-    val normalizedProgressName = normalize(progress.episodeName)
-    episodes.indexOfFirst { episode ->
-        normalize(episode.name) == normalizedProgressName
-    }.takeIf { index -> index >= 0 }?.let { index -> return index }
-
-    val progressNumber = episodeNumber(progress.episodeName)
-    if (progressNumber != null) {
-        episodes.indexOfFirst { episode -> episodeNumber(episode.name) == progressNumber }
-            .takeIf { index -> index >= 0 }
-            ?.let { index -> return index }
-    }
-    return progress.episodeIndex.coerceIn(0, episodes.lastIndex)
+    return matchingEpisodeIndex(episodes, progress.episodeName)
+        ?: progress.episodeIndex.coerceIn(0, episodes.lastIndex)
 }
 
-private fun episodeNumber(name: String): Int? {
-    val patterns = listOf(
-        Regex("第\\s*(\\d+)\\s*[集话期]", RegexOption.IGNORE_CASE),
-        Regex("(?:EP?|集)\\s*0*(\\d+)", RegexOption.IGNORE_CASE),
-        Regex("^\\s*0*(\\d+)\\s*$")
-    )
-    return patterns.firstNotNullOfOrNull { pattern ->
-        pattern.find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    }
-}
+internal data class PendingPlaybackSelection(val detailIndex: Int, val playSourceIndex: Int)
+
 
 @UnstableApi
 @HiltViewModel
@@ -173,43 +156,64 @@ class PlayerViewModel @Inject constructor(
         observeProgress()
     }
 
-    fun selectDetail(index: Int, keepEpisode: Boolean = true) {
-        val targetDetail = uiState.detail(index) ?: return
-        val nextPlaySourceIndex = playSourceIndex.coerceAtMost(targetDetail.playSources.lastIndex)
-        val targetSource = targetDetail.playSources.getOrNull(nextPlaySourceIndex)
-        val nextEpisodeIndex = if (keepEpisode) {
-            episodeIndex.coerceAtMost(targetSource?.episodes?.lastIndex ?: 0)
-        } else {
-            0
-        }
-        detailIndex = index
-        playSourceIndex = nextPlaySourceIndex
-        episodeIndex = nextEpisodeIndex
+    internal var pendingSelection by mutableStateOf<PendingPlaybackSelection?>(null)
+        private set
+
+    fun selectDetail(index: Int) {
+        val target = uiState.detail(index) ?: return
+        val currentLine = uiState.playSource(detailIndex, playSourceIndex)?.name
+        val line = target.playSources.indexOfFirst { it.name == currentLine }.takeIf { it >= 0 } ?: 0
+        requestSelection(index, line)
     }
 
-    fun selectPlaySource(index: Int, keepEpisode: Boolean = false) {
-        val targetSource = uiState.playSource(detailIndex, index) ?: return
-        val nextEpisodeIndex = if (keepEpisode) {
-            episodeIndex.coerceAtMost(targetSource.episodes.lastIndex)
+    fun selectPlaySource(index: Int) {
+        requestSelection(detailIndex, index)
+    }
+
+    private fun requestSelection(targetDetailIndex: Int, targetLineIndex: Int) {
+        if (targetDetailIndex == detailIndex && targetLineIndex == playSourceIndex) return
+        val target = uiState.playSource(targetDetailIndex, targetLineIndex) ?: return
+        val current = uiState.episode(detailIndex, playSourceIndex, episodeIndex) ?: return
+        val matched = matchingEpisodeIndex(target.episodes, current.name)
+        if (matched == null) {
+            pendingSelection = PendingPlaybackSelection(targetDetailIndex, targetLineIndex)
         } else {
-            0
+            applySelection(targetDetailIndex, targetLineIndex, matched)
         }
-        playSourceIndex = index
-        episodeIndex = nextEpisodeIndex
+    }
+
+    internal fun confirmPendingEpisode(index: Int) {
+        val pending = pendingSelection ?: return
+        applySelection(pending.detailIndex, pending.playSourceIndex, index)
+    }
+
+    fun cancelPendingSelection() {
+        pendingSelection = null
+    }
+
+    private fun applySelection(targetDetailIndex: Int, targetLineIndex: Int, targetEpisodeIndex: Int) {
+        if (uiState.episode(targetDetailIndex, targetLineIndex, targetEpisodeIndex) == null) return
+        detailIndex = targetDetailIndex
+        playSourceIndex = targetLineIndex
+        episodeIndex = targetEpisodeIndex
+        pendingSelection = null
     }
 
     fun selectEpisode(index: Int) {
-        episodeIndex = index
+        applySelection(detailIndex, playSourceIndex, index)
     }
 
     fun previousEpisode() {
-        if (episodeIndex > 0) episodeIndex -= 1
+        val source = uiState.playSource(detailIndex, playSourceIndex) ?: return
+        adjacentEpisodeIndex(source.episodes, episodeIndex, -1)?.let(::selectEpisode)
     }
 
     fun nextEpisode() {
         val source = uiState.playSource(detailIndex, playSourceIndex) ?: return
-        if (episodeIndex < source.episodes.lastIndex) episodeIndex += 1
+        adjacentEpisodeIndex(source.episodes, episodeIndex, 1)?.let(::selectEpisode)
     }
+
+    fun hasAlternativeSource(): Boolean = uiState.details.sumOf { it.playSources.size } > 1
 
     fun currentNetworkSnapshot(): NetworkSnapshot = networkMonitor.snapshot()
 
@@ -222,30 +226,50 @@ class PlayerViewModel @Inject constructor(
     fun nextSourceOrLine() {
         val detail = currentDetail() ?: return
         if (playSourceIndex < detail.playSources.lastIndex) {
-            selectPlaySource(playSourceIndex + 1, keepEpisode = true)
+            selectPlaySource(playSourceIndex + 1)
             return
         }
         if (detailIndex < uiState.details.lastIndex) {
-            selectDetail(detailIndex + 1, keepEpisode = true)
+            selectDetail(detailIndex + 1)
             return
         }
         if (uiState.details.size > 1) {
-            selectDetail(0, keepEpisode = true)
+            selectDetail(0)
         } else if (detail.playSources.size > 1) {
-            selectPlaySource(0, keepEpisode = true)
+            selectPlaySource(0)
         }
     }
+
+    private var sessionProgress: WatchProgress? = null
 
     fun saveProgress(positionMs: Long, durationMs: Long) {
         val detail = currentDetail() ?: return
         val playSource = uiState.playSource(detailIndex, playSourceIndex) ?: return
         val episode = playSource.episodes.getOrNull(episodeIndex) ?: return
 
+        val savedEpisodeIndex = episodeIndex
+        val snapshot = WatchProgress(
+            contentKey = detail.item.contentKey,
+            name = detail.item.name,
+            pic = detail.item.pic,
+            year = detail.item.year,
+            preferredSourceId = detail.item.sourceId,
+            preferredVodId = detail.item.vodId,
+            preferredSourceName = detail.item.sourceName,
+            playSourceName = playSource.name,
+            episodeIndex = savedEpisodeIndex,
+            episodeName = episode.name,
+            positionMs = positionMs.coerceAtLeast(0L),
+            durationMs = durationMs.coerceAtLeast(0L),
+            updatedAt = System.currentTimeMillis()
+        )
+        sessionProgress = snapshot
+        savedProgressByKey = savedProgressByKey + (detail.item.contentKey to snapshot)
         viewModelScope.launch {
             progressRepository.save(
                 detail = detail,
                 playSourceName = playSource.name,
-                episodeIndex = episodeIndex,
+                episodeIndex = savedEpisodeIndex,
                 episodeName = episode.name,
                 positionMs = positionMs,
                 durationMs = durationMs
@@ -255,7 +279,8 @@ class PlayerViewModel @Inject constructor(
 
     fun resumePositionForCurrentEpisode(): Long {
         val detail = currentDetail() ?: return 0L
-        val progress = savedProgressByKey[detail.item.contentKey]
+        val progress = sessionProgress?.takeIf { it.contentKey == detail.item.contentKey }
+            ?: savedProgressByKey[detail.item.contentKey]
             ?: savedProgressByKey[detail.item.key]
             ?: return 0L
         val playSource = uiState.playSource(detailIndex, playSourceIndex) ?: return 0L
@@ -422,7 +447,7 @@ internal fun resumePositionForSelection(
     episodeIndex: Int,
     progress: WatchProgress
 ): Long =
-    if (resolveProgressEpisodeIndex(playSource.episodes, progress) == episodeIndex) {
+    if (matchingEpisodeIndex(playSource.episodes, progress.episodeName) == episodeIndex) {
         progress.positionMs.coerceAtLeast(0L)
     } else {
         0L

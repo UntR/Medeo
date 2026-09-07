@@ -8,6 +8,7 @@ object Routes {
     const val HOME = "home"
     const val SEARCH = "search"
     const val SEARCH_PATTERN = "search?query={query}"
+    const val HISTORY = "history"
     const val FAVORITES = "favorites"
     const val SETTINGS = "settings"
 

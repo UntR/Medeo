@@ -134,6 +134,26 @@ class DatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun undoDelete_restoresAllFieldsButNeverOverwritesNewProgress() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val dao = database.progressDao()
+            val original = WatchProgress("测试|2026", "测试", null, "2026", "dbzy", 1L,
+                "测试源", "线路A", 82, "第83集", 60_000L, 120_000L, 20L)
+            dao.upsertForContent(original)
+            dao.deleteByContentKey(original.contentKey)
+            dao.restoreIfAbsent(original)
+            assertEquals(original, dao.findByContentKey(original.contentKey))
+            val newer = original.copy(episodeIndex = 83, episodeName = "第84集", positionMs = 5_000L, updatedAt = 30L)
+            dao.upsertForContent(newer)
+            dao.restoreIfAbsent(original)
+            assertEquals(newer, dao.findByContentKey(original.contentKey))
+        } finally {
+            database.close()
+        }
+    }
+
     private fun createVersion2Database() {
         val configuration = SupportSQLiteOpenHelper.Configuration.builder(context)
             .name(DATABASE_NAME)

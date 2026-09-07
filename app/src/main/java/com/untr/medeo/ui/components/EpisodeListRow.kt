@@ -1,7 +1,8 @@
 package com.untr.medeo.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,7 +45,7 @@ fun EpisodeListRow(
         shadowElevation = if (selected) 2.dp else 1.dp,
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
     ) {
         Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Box(
@@ -64,12 +65,10 @@ fun EpisodeListRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = episode.name.ifBlank { "第${index + 1}集" },
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    style = MaterialTheme.typography.titleSmall
                 )
                 Text(
-                    text = "第 ${index + 1} 集",
+                    text = if (selected) "当前集" else "列表第 ${index + 1} 项",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (selected) {
                         MaterialTheme.colorScheme.onPrimaryContainer

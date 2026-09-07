@@ -26,6 +26,7 @@ data class SearchUiState(
     val hasMore: Boolean = false,
     val completedSources: Int = 0,
     val totalSources: Int = 0,
+    val failedSources: Int = 0,
     val results: List<AggregatedResult> = emptyList(),
     val requiresSourceSetup: Boolean = false,
     val error: String? = null
@@ -76,6 +77,7 @@ class SearchViewModel @Inject constructor(
                 hasMore = false,
                 completedSources = 0,
                 totalSources = 0,
+                failedSources = 0,
                 results = emptyList(),
                 requiresSourceSetup = false,
                 error = null
@@ -93,6 +95,7 @@ class SearchViewModel @Inject constructor(
                     hasMore = false,
                     completedSources = 0,
                     totalSources = 0,
+                    failedSources = 0,
                     results = emptyList(),
                     requiresSourceSetup = false,
                     error = "当前无网络连接，无法搜索"
@@ -109,6 +112,7 @@ class SearchViewModel @Inject constructor(
                 hasMore = false,
                 completedSources = 0,
                 totalSources = 0,
+                failedSources = 0,
                 results = emptyList(),
                 requiresSourceSetup = false,
                 error = null
@@ -122,12 +126,13 @@ class SearchViewModel @Inject constructor(
                     hasMore = progress.hasMore,
                     completedSources = progress.completedSources,
                     totalSources = progress.totalSources,
+                    failedSources = progress.failedSources,
                     results = progress.results,
                     requiresSourceSetup = !progress.loading && progress.totalSources == 0,
                     error = when {
                         progress.loading || progress.loadingMore -> null
                         progress.totalSources == 0 -> "尚未启用数据源"
-                        progress.failedSources == progress.totalSources -> "所有数据源请求失败，请检查网络或稍后重试"
+                        progress.results.isEmpty() && progress.failedSources == progress.totalSources -> "所有数据源请求失败，请检查网络或稍后重试"
                         progress.results.isEmpty() -> "没有找到结果"
                         else -> null
                     }
@@ -161,9 +166,11 @@ class SearchViewModel @Inject constructor(
                     hasMore = progress.hasMore,
                     completedSources = progress.completedSources,
                     totalSources = progress.totalSources,
+                    failedSources = progress.failedSources,
                     results = progress.results,
                     error = when {
                         progress.loadingMore -> null
+                        progress.results.isEmpty() && progress.failedSources == progress.totalSources -> "所有数据源请求失败，请检查网络或稍后重试"
                         progress.results.isEmpty() -> "没有找到结果"
                         else -> null
                     }
@@ -202,3 +209,15 @@ class SearchViewModel @Inject constructor(
 
 internal fun List<AggregatedResult>.matchingResultFor(item: VodItem): AggregatedResult? =
     firstOrNull { result -> result.perSource.any { candidate -> candidate.key == item.key } }
+
+internal fun SearchUiState.sourceStatusLabel(): String {
+    val successes = (completedSources - failedSources).coerceAtLeast(0)
+    val phase = when {
+        loadingMore -> "加载更多"
+        loading -> "正在搜索"
+        else -> "搜索完成"
+    }
+    val counts = "$successes 个源成功、$failedSources 个失败"
+    return if (loading || loadingMore) "$phase：$completedSources/$totalSources 个源已处理，$counts"
+    else "$phase，$counts" + if (failedSources > 0) "，结果可能不完整" else ""
+}
